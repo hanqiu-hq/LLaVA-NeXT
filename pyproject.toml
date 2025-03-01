@@ -59,7 +59,7 @@ train = [
     "decord",
     "tyro",
     "scipy",
-    "jmspath",
+    "jmespath",
     "flash-attn==2.5.8"
 ]
 
