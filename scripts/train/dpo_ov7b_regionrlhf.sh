@@ -18,7 +18,8 @@ export MASTER_PORT=$MASTER_PORT
 
 torchrun --nproc_per_node=1 --master_addr=$MASTER_ADDR --master_port=$MASTER_PORT \
     llava/train/train_dpo.py \
-    --deepspeed scripts/zero2.json \
+    --lora_enable True --lora_r 128 --lora_alpha 256 \
+    --deepspeed scripts/zero3.json \
     --model_name_or_path=${SFT_MODEL} \
     --dpo_alpha=1.0 \
     --beta=${beta} \
@@ -26,7 +27,6 @@ torchrun --nproc_per_node=1 --master_addr=$MASTER_ADDR --master_port=$MASTER_POR
     --version $PROMPT_VERSION \
     --data_path=$DATA_PATH \
     --image_folder $3 \
-    --mm_tunable_parts="mm_vision_tower,mm_mlp_adapter,mm_language_model" \
     --unfreeze_mm_vision_tower True \
     --vision_tower ${VISION_MODEL_VERSION} \
     --mm_projector_type mlp2x_gelu \
