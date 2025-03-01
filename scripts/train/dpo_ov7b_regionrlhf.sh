@@ -1,3 +1,5 @@
+#!/bin/bash
+
 VISION_MODEL_VERSION="google/siglip-so400m-patch14-384"
 
 # DPO Stage

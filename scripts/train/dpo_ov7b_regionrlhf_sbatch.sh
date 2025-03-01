@@ -1,3 +1,5 @@
+#!/bin/bash
+
 #SBATCH -J train_model
 #SBATCH -o ./job_log/%j.out
 #SBATCH -e ./job_log/%j.err
