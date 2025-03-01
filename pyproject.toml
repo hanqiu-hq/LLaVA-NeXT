@@ -59,6 +59,8 @@ train = [
     "decord",
     "tyro",
     "scipy",
+    "jmspath",
+    "flash-attn==2.5.8"
 ]
 
 [project.urls]
