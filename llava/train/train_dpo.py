@@ -120,12 +120,23 @@ class ModelArguments:
     s2: Optional[bool] = field(default=False)
     s2_scales: Optional[str] = field(default="336,672,1008")
 
+    use_pos_skipping: Optional[bool] = field(default=False)
+    pos_skipping_range: Optional[int] = field(default=4096)
+
+
+    mm_newline_position: Optional[str] = field(default="grid")
+    delay_load: Optional[bool] = field(default=True)
+    add_faster_video: Optional[bool] = field(default=False)
+    faster_token_stride: Optional[int] = field(default=10)
+
+
 
 @dataclass
 class DataArguments:
     data_path: str = field(default=None, metadata={"help": "Path to the training data, in llava's instruction.json format. Supporting multiple json files via /path/to/{a,b,c}.json"})
     lazy_preprocess: bool = False
     is_multimodal: bool = False
+    early_mix_text: bool = False
     image_folder: Optional[str] = field(default=None)
     video_folder: Optional[str] = field(default=None)
     video_fps: Optional[int] = field(default=1)
@@ -137,6 +148,8 @@ class DataArguments:
     refine_prompt: Optional[bool] = field(default=False)
     frames_upbound: Optional[int] = field(default=0)
     num_sample: Optional[int] = field(default=None)
+    add_time_instruction: Optional[bool] = field(default=False)
+    force_sample: Optional[bool] = field(default=False)
 
 
 @dataclass
