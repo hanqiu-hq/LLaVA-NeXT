@@ -38,7 +38,6 @@ import tokenizers
 from llava.constants import IGNORE_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN, IMAGE_TOKEN_INDEX
 from torch.utils.data import Dataset
 from llava.train.llava_trainer import LLaVADPOTrainer
-from data_processing.utils import load_jsonl, load_json
 from llava import conversation as conversation_lib
 from llava.model import *
 from llava.model.language_model.llava_qwen import LlavaQwenConfig
@@ -61,6 +60,15 @@ local_rank = None
 import numpy as np
 
 IS_TOKENIZER_GREATER_THAN_0_14 = version.parse(tokenizers.__version__) >= version.parse("0.14")
+
+
+def load_json(pth):
+    return json.load(open(pth, "r", encoding="utf-8"))
+
+
+def load_jsonl(path: str):
+    with open(path, "r", encoding="utf-8") as fh:
+        return [json.loads(line) for line in fh.readlines() if line]
 
 
 @dataclass
