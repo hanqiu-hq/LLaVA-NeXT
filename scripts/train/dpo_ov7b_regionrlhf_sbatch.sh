@@ -49,9 +49,9 @@ torchrun --nproc_per_node=1 --master_addr=$MASTER_ADDR --master_port=$MASTER_POR
     --run_name "llava_ov_region_rlhf" \
     --output_dir $OUTPUT_DIR \
     --num_train_epochs $EPOCH \
-    --per_device_train_batch_size 2 \
+    --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 1 \
-    --gradient_accumulation_steps 1 \
+    --gradient_accumulation_steps 2 \
     --evaluation_strategy "no" \
     --save_strategy "no" \
     --save_total_limit 1 \
