@@ -55,7 +55,7 @@ torchrun --nproc_per_node=1 --master_addr=$MASTER_ADDR --master_port=$MASTER_POR
     --evaluation_strategy "no" \
     --save_strategy "no" \
     --save_total_limit 1 \
-    --learning_rate 1e-5 \
+    --learning_rate $4 \
     --weight_decay 0. \
     --warmup_ratio 0.1 \
     --lr_scheduler_type "cosine" \
