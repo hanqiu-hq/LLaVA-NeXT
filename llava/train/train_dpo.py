@@ -257,6 +257,7 @@ def find_all_linear_names(model):
 
     if "lm_head" in lora_module_names:  # needed for 16-bit
         lora_module_names.remove("lm_head")
+    print(list(lora_module_names))
     return list(lora_module_names)
 
 
