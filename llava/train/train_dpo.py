@@ -254,7 +254,7 @@ def find_all_linear_names(model):
         if isinstance(module, cls):
             # names = name.split(".")
             # lora_module_names.add(names[0] if len(names) == 1 else names[-1])
-            if name.endswith("lm_head"):
+            if "lm_head" in name:
                 continue
             lora_module_names.add(name)
 

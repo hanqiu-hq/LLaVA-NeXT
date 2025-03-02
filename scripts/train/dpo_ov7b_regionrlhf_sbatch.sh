@@ -29,7 +29,7 @@ export MASTER_PORT=$MASTER_PORT
 torchrun --nproc_per_node=1 --master_addr=$MASTER_ADDR --master_port=$MASTER_PORT \
     llava/train/train_dpo.py \
     --lora_enable True --lora_r 128 --lora_alpha 256 \
-    --deepspeed scripts/zero3_offload.json \
+    --deepspeed scripts/zero3.json \
     --model_name_or_path=${SFT_MODEL} \
     --dpo_alpha=1.0 \
     --beta=${beta} \
