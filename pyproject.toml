@@ -60,7 +60,6 @@ train = [
     "tyro",
     "scipy",
     "jmespath",
-    "flash-attn==2.5.8"
 ]
 
 [project.urls]
