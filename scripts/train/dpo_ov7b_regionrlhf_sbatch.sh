@@ -68,6 +68,5 @@ torchrun --nproc_per_node=1 --master_addr=$MASTER_ADDR --master_port=$MASTER_POR
     --dataloader_num_workers 4 \
     --lazy_preprocess True \
     --report_to wandb \
-    --dataloader_drop_last True
-
-
+    --dataloader_drop_last True \
+    --shuffle_data True
