@@ -150,6 +150,7 @@ class DataArguments:
     num_sample: Optional[int] = field(default=None)
     add_time_instruction: Optional[bool] = field(default=False)
     force_sample: Optional[bool] = field(default=False)
+    shuffle_data: Optional[bool] = field(default=False)
 
 
 @dataclass
@@ -999,6 +1000,8 @@ class DPODataset(Dataset):
         rank0_print("Formatting inputs...Skip in lazy mode")
         self.tokenizer = tokenizer
         self.data_args = data_args
+        if data_args.shuffle_data:
+            random.shuffle(self.list_data_dict)
 
     def __len__(self):
         return len(self.list_data_dict)
