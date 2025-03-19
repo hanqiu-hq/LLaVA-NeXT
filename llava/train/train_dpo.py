@@ -58,6 +58,7 @@ from typing import Any
 
 local_rank = None
 import numpy as np
+from datasets import load_dataset
 
 IS_TOKENIZER_GREATER_THAN_0_14 = version.parse(tokenizers.__version__) >= version.parse("0.14")
 
@@ -934,7 +935,7 @@ def load_data(data_path):
 class DPODataset(Dataset):
     """Dataset for DPODataset fine-tuning."""
 
-    def __init__(self, data_path: str, tokenizer: transformers.PreTrainedTokenizer, data_args: DataArguments):
+    def __init__(self, data_path: str, tokenizer: transformers.PreTrainedTokenizer, data_args: DataArguments, hf_dataset:str=None):
         super(DPODataset, self).__init__()
         # Handle multiple JSON files specified in the data_path
         self.list_data_dict = []
@@ -1003,6 +1004,12 @@ class DPODataset(Dataset):
         if data_args.shuffle_data:
             random.shuffle(self.list_data_dict)
 
+        if hf_dataset is not None:
+            hf_dataset_name, split = hf_dataset.split(":")
+            self.hf_dataset = load_dataset(hf_dataset_name, split=split)
+        else:
+            self.hf_dataset = None
+
     def __len__(self):
         return len(self.list_data_dict)
 
@@ -1033,7 +1040,12 @@ class DPODataset(Dataset):
         processor = self.data_args.image_processor
         # print(f"\n\nInspecting the image path, folder = {image_folder}, image={image_file}\n\n")
         try:
-            image = Image.open(os.path.join(image_folder, image_file)).convert("RGB")
+            if image_file.startswith("hf"):
+                assert self.hf_dataset is not None
+                data_id = int(image_file.split(":")[-1])
+                image = self.hf_dataset[data_id]['image'].convert('RGB')
+            else:
+                image = Image.open(os.path.join(image_folder, image_file)).convert("RGB")
         except Exception as exn:
             print(f"Failed to open image {image_file}. Exception:", exn)
             raise exn
