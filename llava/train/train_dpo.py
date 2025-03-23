@@ -152,6 +152,7 @@ class DataArguments:
     add_time_instruction: Optional[bool] = field(default=False)
     force_sample: Optional[bool] = field(default=False)
     shuffle_data: Optional[bool] = field(default=False)
+    hf_dataset: Optional[str] = field(default=None)
 
 
 @dataclass
@@ -935,7 +936,7 @@ def load_data(data_path):
 class DPODataset(Dataset):
     """Dataset for DPODataset fine-tuning."""
 
-    def __init__(self, data_path: str, tokenizer: transformers.PreTrainedTokenizer, data_args: DataArguments, hf_dataset:str=None):
+    def __init__(self, data_path: str, tokenizer: transformers.PreTrainedTokenizer, data_args: DataArguments):
         super(DPODataset, self).__init__()
         # Handle multiple JSON files specified in the data_path
         self.list_data_dict = []
@@ -1004,8 +1005,8 @@ class DPODataset(Dataset):
         if data_args.shuffle_data:
             random.shuffle(self.list_data_dict)
 
-        if hf_dataset is not None:
-            hf_dataset_name, split = hf_dataset.split(":")
+        if data_args.hf_dataset is not None:
+            hf_dataset_name, split = data_args.hf_dataset.split(":")
             self.hf_dataset = load_dataset(hf_dataset_name, split=split)
         else:
             self.hf_dataset = None
