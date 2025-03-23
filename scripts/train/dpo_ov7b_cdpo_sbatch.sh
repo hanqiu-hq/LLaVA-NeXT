@@ -8,6 +8,13 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --quotatype=spot
 
+#export OMP_NUM_THREADS=8
+#export NCCL_IB_DISABLE=0
+#export NCCL_IB_GID_INDEX=3
+## export NCCL_IB_HCA=${ARNOLD_RDMA_DEVICE}
+#export NCCL_SOCKET_IFNAME=eth0
+#export NCCL_DEBUG=INFO
+
 VISION_MODEL_VERSION="google/siglip-so400m-patch14-384"
 
 # DPO Stage
