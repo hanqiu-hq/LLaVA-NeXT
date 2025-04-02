@@ -85,7 +85,7 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
                     rank0_print(f"Overwriting config with {overwrite_config}")
                     for k, v in overwrite_config.items():
                         setattr(lora_cfg_pretrained, k, v)
-                model = LlavaQwenForCausalLM.from_pretrained(model_path, low_cpu_mem_usage=True, attn_implementation=attn_implementation, config=lora_cfg_pretrained, **kwargs)
+                model = LlavaQwenForCausalLM.from_pretrained(model_base, low_cpu_mem_usage=True, attn_implementation=attn_implementation, config=lora_cfg_pretrained, **kwargs)
             else:
                 from llava.model.language_model.llava_llama import LlavaConfig
 
