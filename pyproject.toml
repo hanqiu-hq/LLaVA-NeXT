@@ -24,7 +24,8 @@ standalone = [
     "ftfy",
 ]
 
-
+#"torch==2.1.2",
+#"torchvision==0.16.2",
 train = [
     "llava[standalone]",
     "numpy==1.26.1",
@@ -34,8 +35,8 @@ train = [
     "numpy",
     "requests",
     "sentencepiece",
-    "torch==2.1.2",
-    "torchvision==0.16.2",
+    "torch",
+    "torchvision",
     "uvicorn",
     "wandb",
     "deepspeed==0.14.4",
