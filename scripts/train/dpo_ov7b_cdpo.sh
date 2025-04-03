@@ -21,7 +21,7 @@ OUTPUT_DIR=$2
 torchrun --nproc_per_node=2 \
     llava/train/train_dpo.py \
     --lora_enable True --lora_r 128 --lora_alpha 256 \
-    --deepspeed scripts/zero3.json \
+    --deepspeed scripts/zero3_offload.json \
     --model_name_or_path=${SFT_MODEL} \
     --dpo_alpha=1.0 \
     --beta=${beta} \
@@ -29,7 +29,7 @@ torchrun --nproc_per_node=2 \
     --version $PROMPT_VERSION \
     --data_path=$DATA_PATH \
     --image_folder "./" \
-    --unfreeze_mm_vision_tower False \
+    --unfreeze_mm_vision_tower True \
     --vision_tower ${VISION_MODEL_VERSION} \
     --mm_projector_type mlp2x_gelu \
     --mm_vision_select_layer -2 \
