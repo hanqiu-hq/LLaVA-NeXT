@@ -1,9 +1,17 @@
 #!/bin/bash
 
-export OMP_NUM_THREADS=8
+#SBATCH -J train_model
+#SBATCH -o ./job_log/%j.out
+#SBATCH -e ./job_log/%j.err
+#SBATCH -p Gvlab-S1-32
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=8
+#SBATCH --quotatype=spot
+
+#export OMP_NUM_THREADS=8
 #export NCCL_IB_DISABLE=0
 #export NCCL_IB_GID_INDEX=3
-# export NCCL_IB_HCA=${ARNOLD_RDMA_DEVICE}
+## export NCCL_IB_HCA=${ARNOLD_RDMA_DEVICE}
 #export NCCL_SOCKET_IFNAME=eth0
 #export NCCL_DEBUG=INFO
 
@@ -18,7 +26,14 @@ beta=0.1
 DATA_PATH=$1
 OUTPUT_DIR=$2
 
-torchrun --nproc_per_node=2 \
+MASTER_ADDR=`scontrol show hostname $SLURM_JOB_NODELIST | head -n1`
+MASTER_PORT=$((RANDOM % 101 + 20001))
+echo $MASTER_ADDR
+echo $MASTER_PORT
+export MASTER_ADDR=$MASTER_ADDR
+export MASTER_PORT=$MASTER_PORT
+
+torchrun --nproc_per_node=1 --master_addr=$MASTER_ADDR --master_port=$MASTER_PORT \
     llava/train/train_dpo.py \
     --lora_enable True --lora_r 128 --lora_alpha 256 \
     --deepspeed scripts/zero3.json \
@@ -28,7 +43,7 @@ torchrun --nproc_per_node=2 \
     --gamma=0 \
     --version $PROMPT_VERSION \
     --data_path=$DATA_PATH \
-    --image_folder "./" \
+    --image_folder $3 \
     --unfreeze_mm_vision_tower False \
     --vision_tower ${VISION_MODEL_VERSION} \
     --mm_projector_type mlp2x_gelu \
@@ -49,7 +64,7 @@ torchrun --nproc_per_node=2 \
     --evaluation_strategy "no" \
     --save_strategy "no" \
     --save_total_limit 1 \
-    --learning_rate $3 \
+    --learning_rate $4 \
     --weight_decay 0. \
     --warmup_ratio 0.1 \
     --lr_scheduler_type "cosine" \
