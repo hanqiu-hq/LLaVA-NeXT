@@ -267,7 +267,7 @@ class RewardDataCollatorWithPadding:
         return batch
 
 
-@dataclass
+@dataclass(kw_only=True)
 class DPODataCollatorWithPadding:
     r"""
     DPO DataCollator class that pads the tokenized inputs to the maximum length of the batch.
