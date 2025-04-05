@@ -1774,7 +1774,7 @@ def train(attn_implementation=None):
 
     train_dataset = make_dpo_data_module(tokenizer=tokenizer, data_args=data_args)
     data_collator = DPODataCollator(
-        tokenizer=tokenizer,
+        tokenizer,
         pad_token_id=tokenizer.pad_token_id,
         label_pad_token_id=IGNORE_INDEX,
     )
