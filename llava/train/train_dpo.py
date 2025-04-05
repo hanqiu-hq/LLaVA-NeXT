@@ -1224,7 +1224,6 @@ class DPODataset(Dataset):
         return data_dict
 
 
-@dataclass
 class DPODataCollator(DPODataCollatorWithPadding):
     """Collate examples for DPO fine-tuning."""
 
@@ -1773,11 +1772,7 @@ def train(attn_implementation=None):
                         module = module.to(torch.bfloat16)
 
     train_dataset = make_dpo_data_module(tokenizer=tokenizer, data_args=data_args)
-    data_collator = DPODataCollator(
-        tokenizer,
-        label_pad_token_id=IGNORE_INDEX,
-        pad_token_id=tokenizer.pad_token_id,
-    )
+    data_collator = DPODataCollator(tokenizer=tokenizer, label_pad_token_id=IGNORE_INDEX, pad_token_id=tokenizer.pad_token_id)
 
     trainer = LLaVADPOTrainer(
         model,
