@@ -76,4 +76,5 @@ torchrun --nproc_per_node=1 --master_addr=$MASTER_ADDR --master_port=$MASTER_POR
     --lazy_preprocess True \
     --report_to wandb \
     --dataloader_drop_last True \
-    --hf_dataset "openbmb/RLAIF-V-Dataset:train"
+    --hf_dataset "openbmb/RLAIF-V-Dataset:train" \
+    ${@:5}

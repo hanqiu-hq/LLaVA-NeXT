@@ -194,6 +194,7 @@ class TrainingArguments(transformers.TrainingArguments):
     noise_beta: float = field(default=1.0)
     noise_loss_type: str = "pos_exp"
     noise_step: int = field(default=800)
+    use_logits_to_keep: bool = field(default=False)
 
 
 def maybe_zero_3(param, ignore_status=False, name=None):
@@ -626,9 +627,9 @@ def preprocess_qwen(sources, tokenizer: transformers.PreTrainedTokenizer, has_im
                 _input_id = tokenizer(role).input_ids + nl_tokens + tokenizer(sentence["value"]).input_ids + [im_end] + nl_tokens
             input_id += _input_id
             if role == "<|im_start|>user":
-                _target = [im_start] + [IGNORE_INDEX] * (len(_input_id) - 3) + [im_end] + nl_tokens
+                _target = [IGNORE_INDEX] + [IGNORE_INDEX] * (len(_input_id) - 3) + [IGNORE_INDEX] + [IGNORE_INDEX]
             elif role == "<|im_start|>assistant":
-                _target = [im_start] + [IGNORE_INDEX] * len(tokenizer(role).input_ids) + _input_id[len(tokenizer(role).input_ids) + 1 : -2] + [im_end] + nl_tokens
+                _target = [IGNORE_INDEX] + [IGNORE_INDEX] * len(tokenizer(role).input_ids) + _input_id[len(tokenizer(role).input_ids) + 1 : -2] + [im_end] + nl_tokens
             else:
                 raise NotImplementedError
             target += _target
@@ -645,6 +646,57 @@ def preprocess_qwen(sources, tokenizer: transformers.PreTrainedTokenizer, has_im
         labels=targets,  # tensor(bs x seq_len)
         # attention_mask=input_ids.ne(tokenizer.pad_token_id), # tensor(bs x seq_len)
     )
+
+
+# def preprocess_qwen(sources, tokenizer: transformers.PreTrainedTokenizer, has_image: bool = False, max_len=2048, system_message: str = "You are a helpful assistant.") -> Dict:
+#     roles = {"human": "<|im_start|>user", "gpt": "<|im_start|>assistant"}
+#
+#     im_start, im_end = tokenizer.additional_special_tokens_ids
+#     nl_tokens = tokenizer("\n").input_ids
+#     _system = tokenizer("system").input_ids + nl_tokens
+#     _user = tokenizer("user").input_ids + nl_tokens
+#     _assistant = tokenizer("assistant").input_ids + nl_tokens
+#
+#     # Apply prompt templates
+#     input_ids, targets = [], []
+#     for i, source in enumerate(sources):
+#         if roles[source[0]["from"]] != roles["human"]:
+#             source = source[1:]
+#
+#         input_id, target = [], []
+#         system = [im_start] + _system + tokenizer(system_message).input_ids + [im_end] + nl_tokens
+#         input_id += system
+#         target += [im_start] + [IGNORE_INDEX] * (len(system) - 3) + [im_end] + nl_tokens
+#         assert len(input_id) == len(target)
+#         for j, sentence in enumerate(source):
+#             role = roles[sentence["from"]]
+#             if has_image and "<image>" in sentence["value"]:
+#                 assert sentence["value"].startswith("<image>"), print(sentence["value"])
+#
+#                 _input_id = tokenizer(role).input_ids + nl_tokens + [IMAGE_TOKEN_INDEX] + nl_tokens + tokenizer(sentence["value"][len("<image>") :]).input_ids + [im_end] + nl_tokens
+#             else:
+#                 _input_id = tokenizer(role).input_ids + nl_tokens + tokenizer(sentence["value"]).input_ids + [im_end] + nl_tokens
+#             input_id += _input_id
+#             if role == "<|im_start|>user":
+#                 _target = [im_start] + [IGNORE_INDEX] * (len(_input_id) - 3) + [im_end] + nl_tokens
+#             elif role == "<|im_start|>assistant":
+#                 _target = [im_start] + [IGNORE_INDEX] * len(tokenizer(role).input_ids) + _input_id[len(tokenizer(role).input_ids) + 1 : -2] + [im_end] + nl_tokens
+#             else:
+#                 raise NotImplementedError
+#             target += _target
+#         assert len(input_id) == len(target)
+#         # input_id += [tokenizer.pad_token_id] * (max_len - len(input_id))
+#         # target += [IGNORE_INDEX] * (max_len - len(target))
+#         input_ids.append(input_id)
+#         targets.append(target)
+#     input_ids = torch.tensor(input_ids, dtype=torch.long)
+#     targets = torch.tensor(targets, dtype=torch.long)
+#
+#     return dict(
+#         input_ids=input_ids,  # tensor(bs x seq_len)
+#         labels=targets,  # tensor(bs x seq_len)
+#         # attention_mask=input_ids.ne(tokenizer.pad_token_id), # tensor(bs x seq_len)
+#     )
 
 
 def preprocess_llama3(
@@ -1801,6 +1853,7 @@ def train(attn_implementation=None):
         noise_beta=training_args.noise_beta,
         noise_loss_type=training_args.noise_loss_type,
         noise_step=training_args.noise_step,
+        use_logits_to_keep=training_args.use_logits_to_keep,
     )
 
     if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):

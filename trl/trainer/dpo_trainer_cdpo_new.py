@@ -206,7 +206,6 @@ class DPOTrainer(Trainer):
         model_adapter_name: Optional[str] = None,
         ref_adapter_name: Optional[str] = None,
         reference_free: bool = False,
-        use_logits_to_keep: bool = False,
     ):
         # import pdb;pdb.set_trace()
         if model_init_kwargs is None:
@@ -312,7 +311,6 @@ class DPOTrainer(Trainer):
         self.max_target_length = max_target_length
         self.tokenizer = tokenizer
         self.precompute_ref_log_probs = precompute_ref_log_probs
-        self.use_logits_to_keep = use_logits_to_keep
 
         # Since ref_logs are precomputed on the first call to get_train/eval_dataloader
         # keep track of first called to avoid computation of future calls
@@ -827,9 +825,8 @@ class DPOTrainer(Trainer):
 
         return losses, chosen_rewards, rejected_rewards
 
-    # @staticmethod
+    @staticmethod
     def get_batch_logps(
-        self,
         logits: torch.FloatTensor,
         labels: torch.LongTensor,
         average_log_prob: bool = False,
@@ -854,13 +851,6 @@ class DPOTrainer(Trainer):
         if not is_encoder_decoder:
             labels = labels[:, 1:].clone()
             logits = logits[:, :-1, :]
-
-        if self.use_logits_to_keep:
-            first_compute_index = labels.ne(self.label_pad_token_id).nonzero(as_tuple=True)[1].min()
-            logits_to_keep = (labels.shape[1] - first_compute_index).item() + 1
-            labels = labels[:, -logits_to_keep:]
-            logits = logits[:, -logits_to_keep:]
-
         loss_mask = labels != label_pad_token_id
 
         # dummy token; we'll ignore the losses on these tokens later
@@ -875,14 +865,8 @@ class DPOTrainer(Trainer):
 
     def get_sft_loss(self, logits, labels):
         # Shift so that tokens < n predict n
-        shift_logits = logits[:, :-1, :].contiguous()
-        shift_labels = labels[:, 1:].contiguous()
-        if self.use_logits_to_keep:
-            first_compute_index = shift_labels.ne(self.label_pad_token_id).nonzero(as_tuple=True)[1].min()
-            logits_to_keep = (shift_labels.shape[1] - first_compute_index).item() + 1
-            shift_logits = shift_logits[:, -logits_to_keep:]
-            shift_labels = shift_labels[:, -logits_to_keep:]
-
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
         # Flatten the tokens
         loss_fct = nn.CrossEntropyLoss()
         shift_logits = shift_logits.view(-1, shift_logits.size(-1))
@@ -892,7 +876,7 @@ class DPOTrainer(Trainer):
         loss = loss_fct(shift_logits, shift_labels)
         return loss
 
-    def concatenated_forward(self, model: nn.Module, batch: Dict[str, Union[List, torch.LongTensor]], noise_forward=False) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+    def concatenated_forward(self, model: nn.Module, batch: Dict[str, Union[List, torch.LongTensor]], noise_forward_pos=False, noise_forward_both=False) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
         """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
 
         We do this to avoid doing two forward passes, because it's faster for FSDP.
@@ -907,10 +891,31 @@ class DPOTrainer(Trainer):
         )
         len_chosen = batch["chosen_labels"].shape[0]
 
-        if noise_forward:
-            concatenated_batch["concatenated_images"] = [
-                add_image_diffusion_noise(_image, self.noise_step)
-                for _image in concatenated_batch["concatenated_images"]]
+        if noise_forward_pos:
+            len_noise = len_chosen
+            concatenated_batch["concatenated_input_ids"] = torch.cat([
+                concatenated_batch["concatenated_input_ids"],
+                concatenated_batch["concatenated_input_ids"][:len_chosen]], dim=0)
+            concatenated_batch["concatenated_attention_mask"] = torch.cat([
+                concatenated_batch["concatenated_attention_mask"],
+                concatenated_batch["concatenated_attention_mask"][:len_chosen]], dim=0)
+            concatenated_batch["concatenated_labels"] = torch.cat([
+                concatenated_batch["concatenated_labels"],
+                concatenated_batch["concatenated_labels"][:len_chosen]], dim=0)
+            concatenated_batch["concatenated_images"] = concatenated_batch["concatenated_images"] + [
+                add_image_diffusion_noise(_image, self.noise_step) for _image in batch["images"]]
+            concatenated_batch["image_sizes"] = concatenated_batch["image_sizes"] + batch["image_sizes"]
+            concatenated_batch["modalities"] = concatenated_batch["modalities"] + batch["modalities"]
+
+        if noise_forward_both:
+            len_noise = concatenated_batch["concatenated_input_ids"].shape[0]
+            concatenated_batch["concatenated_input_ids"] = concatenated_batch["concatenated_input_ids"].repeat(2)
+            concatenated_batch["concatenated_attention_mask"] = concatenated_batch["concatenated_attention_mask"].repeat(2)
+            concatenated_batch["concatenated_labels"] = concatenated_batch["concatenated_labels"].repeat(2)
+            concatenated_batch["concatenated_images"] = concatenated_batch["concatenated_images"] + [
+                add_image_diffusion_noise(_image, self.noise_step) for _image in concatenated_batch["concatenated_images"]]
+            concatenated_batch["image_sizes"] = concatenated_batch["image_sizes"] * 2
+            concatenated_batch["modalities"] = concatenated_batch["modalities"] * 2
 
         # import pdb; pdb.set_trace()
         all_logits, new_labels = model(
@@ -923,6 +928,8 @@ class DPOTrainer(Trainer):
             use_cache=False,
             dpo_forward=True,
         )
+
+
         all_logits = all_logits.to(torch.float32)
 
         if noise_forward:
@@ -1007,11 +1014,8 @@ class DPOTrainer(Trainer):
         )
         unscaled_dpo_losses = unscaled_dpo_losses.mean()
         dpo_losses = unscaled_dpo_losses * self.dpo_alpha
-        if self.gamma > 0:
-            unscaled_sft_loss = self.get_sft_loss(policy_chosen_logits, chosen_labels)
-            sft_loss = unscaled_sft_loss * self.gamma
-        else:
-            sft_loss = 0
+        unscaled_sft_loss = self.get_sft_loss(policy_chosen_logits, chosen_labels)
+        sft_loss = unscaled_sft_loss * self.gamma
 
         if self.noise_alpha > 0 and self.noise_loss_type.startswith('pos'):
             noise_image = [add_image_diffusion_noise(_image, self.noise_step) for _image in batch["images"]]
