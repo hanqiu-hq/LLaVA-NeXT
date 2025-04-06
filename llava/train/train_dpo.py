@@ -190,6 +190,10 @@ class TrainingArguments(transformers.TrainingArguments):
     gamma: float = field(default=1.0)
     generate_during_eval: bool = field(default=False)
     precompute_ref_log_probs: bool = field(default=False)
+    noise_alpha: float = field(default=0.0)
+    noise_beta: float = field(default=1.0)
+    noise_loss_type: str = "pos_exp"
+    noise_step: int = field(default=800)
 
 
 def maybe_zero_3(param, ignore_status=False, name=None):
@@ -1793,6 +1797,10 @@ def train(attn_implementation=None):
         max_length=training_args.model_max_length,
         generate_during_eval=False,  # training_args.generate_during_eval,
         precompute_ref_log_probs=training_args.precompute_ref_log_probs,
+        noise_alpha=training_args.noise_alpha,
+        noise_beta=training_args.noise_beta,
+        noise_loss_type=training_args.noise_loss_type,
+        noise_step=training_args.noise_step,
     )
 
     if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):

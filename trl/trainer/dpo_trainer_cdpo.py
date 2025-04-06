@@ -64,6 +64,31 @@ if is_deepspeed_available():
 from transformers.integrations.deepspeed import is_deepspeed_zero3_enabled
 
 
+def add_image_diffusion_noise(image_tensor, noise_step):
+    num_steps = 1000  # Number of diffusion steps
+
+    # decide beta in each step
+    betas = torch.linspace(-6,6,num_steps)
+    betas = torch.sigmoid(betas) * (0.5e-2 - 1e-5) + 1e-5
+
+    # decide alphas in each step
+    alphas = 1 - betas
+    alphas_prod = torch.cumprod(alphas, dim=0)
+    alphas_bar_sqrt = torch.sqrt(alphas_prod)
+    one_minus_alphas_bar_sqrt = torch.sqrt(1 - alphas_prod)
+
+    def q_x(x_0,t):
+        noise = torch.randn_like(x_0)
+        alphas_t = alphas_bar_sqrt[t]
+        alphas_1_m_t = one_minus_alphas_bar_sqrt[t]
+        return (alphas_t*x_0 + alphas_1_m_t*noise)
+
+    noisy_image = image_tensor.clone()
+    image_tensor_cd = q_x(noisy_image, noise_step)
+
+    return image_tensor_cd
+
+
 class DPOTrainer(Trainer):
     r"""
     Initialize DPOTrainer.
@@ -148,6 +173,10 @@ class DPOTrainer(Trainer):
         dpo_alpha: float = 1.0,
         beta: float = 0.1,
         gamma: float = 0.1,
+        noise_alpha: float = 0.0,
+        noise_beta: float = 1.0,
+        noise_loss_type: str = "pos_exp",
+        noise_step: int = 800,
         label_smoothing: float = 0,
         loss_type: Literal["sigmoid", "hinge", "ipo", "kto_pair"] = "sigmoid",
         args: Optional[TrainingArguments] = None,
@@ -294,6 +323,10 @@ class DPOTrainer(Trainer):
         self.dpo_alpha = dpo_alpha
         self.beta = beta
         self.gamma = gamma
+        self.noise_alpha = noise_alpha
+        self.noise_beta = noise_beta
+        self.noise_loss_type = noise_loss_type
+        self.noise_step = noise_step
         self.label_smoothing = label_smoothing
         self.loss_type = loss_type
 
@@ -843,7 +876,7 @@ class DPOTrainer(Trainer):
         loss = loss_fct(shift_logits, shift_labels)
         return loss
 
-    def concatenated_forward(self, model: nn.Module, batch: Dict[str, Union[List, torch.LongTensor]]) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+    def concatenated_forward(self, model: nn.Module, batch: Dict[str, Union[List, torch.LongTensor]], noise_forward=False) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
         """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
 
         We do this to avoid doing two forward passes, because it's faster for FSDP.
@@ -858,6 +891,11 @@ class DPOTrainer(Trainer):
         )
         len_chosen = batch["chosen_labels"].shape[0]
 
+        if noise_forward:
+            concatenated_batch["concatenated_images"] = [
+                add_image_diffusion_noise(_image, self.noise_step)
+                for _image in concatenated_batch["concatenated_images"]]
+
         # import pdb; pdb.set_trace()
         all_logits, new_labels = model(
             concatenated_batch["concatenated_input_ids"],
@@ -870,6 +908,19 @@ class DPOTrainer(Trainer):
             dpo_forward=True,
         )
         all_logits = all_logits.to(torch.float32)
+
+        if noise_forward:
+            all_probs = self.get_batch_logps(
+                all_logits,
+                new_labels,
+                average_log_prob=True,
+                is_encoder_decoder=self.is_encoder_decoder,
+                label_pad_token_id=self.label_pad_token_id,
+            ).exp()
+            chosen_probs_noise = all_probs[:len_chosen]
+            rejected_probs_noise = all_probs[len_chosen:]
+            return chosen_probs_noise, rejected_probs_noise
+
         all_logps = self.get_batch_logps(
             all_logits,
             new_labels,
@@ -880,16 +931,6 @@ class DPOTrainer(Trainer):
 
         chosen_logps = all_logps[:len_chosen]
         rejected_logps = all_logps[len_chosen:]
-
-        # don't count image embeds logits
-        # loss_mask = new_labels != -100
-        # logits = [all_logits[i][loss_mask[i]] for i in range(loss_mask.shape[0])]
-        # chosen_logits = logits[:len_chosen]
-        # rejected_logits = logits[len_chosen:]
-        # chosen_logits = [l.detach().cpu().mean() for l in chosen_logits]
-        # rejected_logits = [l.detach().cpu().mean() for l in rejected_logits]
-        # chosen_logits = sum(chosen_logits)/len_chosen
-        # rejected_logits = sum(rejected_logits)/len_chosen
 
         chosen_logits = all_logits[:len_chosen]
         rejected_logits = all_logits[len_chosen:]
@@ -910,15 +951,6 @@ class DPOTrainer(Trainer):
         2. all gather metrics
         """
         metrics = {}
-
-        (
-            policy_chosen_logps,
-            policy_rejected_logps,
-            policy_chosen_logits,
-            policy_rejected_logits,
-            chosen_labels,
-            rejected_labels,
-        ) = self.concatenated_forward(model, batch)
 
         # if reference_chosen_logps and reference_rejected_logps in batch use them, otherwise use the reference model
         if "reference_chosen_logps" in batch and "reference_rejected_logps" in batch:
@@ -942,6 +974,15 @@ class DPOTrainer(Trainer):
                         self.ref_model, batch
                     )[:2]
 
+        (
+            policy_chosen_logps,
+            policy_rejected_logps,
+            policy_chosen_logits,
+            policy_rejected_logits,
+            chosen_labels,
+            rejected_labels,
+        ) = self.concatenated_forward(model, batch)
+
         unscaled_dpo_losses, chosen_rewards, rejected_rewards = self.dpo_loss(
             policy_chosen_logps,
             policy_rejected_logps,
@@ -953,8 +994,55 @@ class DPOTrainer(Trainer):
         unscaled_sft_loss = self.get_sft_loss(policy_chosen_logits, chosen_labels)
         sft_loss = unscaled_sft_loss * self.gamma
 
+        if self.noise_alpha > 0 and self.noise_loss_type.startswith('pos'):
+            noise_image = [add_image_diffusion_noise(_image, self.noise_step) for _image in batch["images"]]
+            policy_chosen_logits_noise, new_labels = model(
+                batch["chosen_input_ids"],
+                attention_mask=batch["chosen_attention_mask"],
+                labels=batch["chosen_labels"],
+                images=noise_image,
+                image_sizes=batch["image_sizes"],
+                modalities=batch["modalities"],
+                use_cache=False,
+                dpo_forward=True,
+            )
+            policy_chosen_logits_noise = policy_chosen_logits_noise.to(torch.float32)
+
+            chosen_logps_noise = self.get_batch_logps(
+                policy_chosen_logits_noise,
+                new_labels,
+                average_log_prob=True,
+                is_encoder_decoder=self.is_encoder_decoder,
+                label_pad_token_id=self.label_pad_token_id,
+            )
+
+            loss_mask = chosen_labels[:, 1:] != self.label_pad_token_id
+            chosen_logps = (policy_chosen_logps / loss_mask.sum(-1))
+
+            if self.noise_loss_type == 'pos_exp':
+                unscaled_noise_loss = -F.logsigmoid(
+                    self.noise_beta * (chosen_logps.exp() - chosen_logps_noise.exp())).mean()
+            elif self.noise_loss_type == 'pos_log':
+                unscaled_noise_loss = -F.logsigmoid((chosen_logps - chosen_logps_noise)).mean()
+            else:
+                raise TypeError(f"Unknown noise loss type: {self.noise_loss_type}")
+        elif self.noise_alpha > 0 and self.noise_loss_type.startswith('diff'):
+            loss_mask = chosen_labels[:, 1:] != self.label_pad_token_id
+            chosen_probs = (policy_chosen_logps / loss_mask.sum(-1)).exp()
+            loss_mask = rejected_labels[:, 1:] != self.label_pad_token_id
+            rejected_probs = (policy_rejected_logps / loss_mask.sum(-1)).exp()
+            chosen_probs_noise, rejected_probs_noise = self.concatenated_forward(
+                model, batch, noise_forward=True)
+            unscaled_noise_loss = -F.logsigmoid(self.noise_beta * (
+                ((chosen_probs - chosen_probs_noise) - (rejected_probs - rejected_probs_noise)))).mean()
+        else:
+            unscaled_noise_loss = 0
+
+        noise_loss = self.noise_alpha * unscaled_noise_loss
+        print(unscaled_noise_loss)
+
         # print(sft_loss.shape, dpo_losses.shape)
-        losses = dpo_losses + sft_loss
+        losses = dpo_losses + sft_loss + noise_loss
         # losses = sft_loss # sft only
         # losses = dpo_losses # dpo only
         reward_accuracies = (chosen_rewards > rejected_rewards).float()
