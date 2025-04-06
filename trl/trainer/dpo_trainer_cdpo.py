@@ -1039,7 +1039,6 @@ class DPOTrainer(Trainer):
             unscaled_noise_loss = 0
 
         noise_loss = self.noise_alpha * unscaled_noise_loss
-        print(unscaled_noise_loss)
 
         # print(sft_loss.shape, dpo_losses.shape)
         losses = dpo_losses + sft_loss + noise_loss
