@@ -25,6 +25,7 @@ beta=0.1
 
 DATA_PATH=$1
 OUTPUT_DIR=$2
+LEARNING_RATE=$3
 
 MASTER_ADDR=`scontrol show hostname $SLURM_JOB_NODELIST | head -n1`
 MASTER_PORT=$((RANDOM % 101 + 20001))
@@ -43,7 +44,7 @@ torchrun --nproc_per_node=1 --master_addr=$MASTER_ADDR --master_port=$MASTER_POR
     --gamma=0 \
     --version $PROMPT_VERSION \
     --data_path=$DATA_PATH \
-    --image_folder $3 \
+    --image_folder "./" \
     --unfreeze_mm_vision_tower True \
     --vision_tower ${VISION_MODEL_VERSION} \
     --mm_projector_type mlp2x_gelu \
@@ -64,7 +65,7 @@ torchrun --nproc_per_node=1 --master_addr=$MASTER_ADDR --master_port=$MASTER_POR
     --evaluation_strategy "no" \
     --save_strategy "no" \
     --save_total_limit 1 \
-    --learning_rate $4 \
+    --learning_rate $LEARNING_RATE \
     --weight_decay 0. \
     --warmup_ratio 0.1 \
     --lr_scheduler_type "cosine" \
@@ -77,4 +78,4 @@ torchrun --nproc_per_node=1 --master_addr=$MASTER_ADDR --master_port=$MASTER_POR
     --report_to wandb \
     --dataloader_drop_last True \
     --hf_dataset "openbmb/RLAIF-V-Dataset:train" \
-    ${@:5}
+    ${@:4}
