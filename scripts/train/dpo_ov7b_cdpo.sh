@@ -20,7 +20,9 @@ DATA_PATH=$2
 OUTPUT_DIR=$3
 LEARNING_RATE=$4
 
-torchrun --nproc_per_node=$NUM_GPUS \
+MASTER_PORT=$((RANDOM % 101 + 20001))
+
+torchrun --nproc_per_node=$NUM_GPUS --master_port=$MASTER_PORT \
     llava/train/train_dpo.py \
     --lora_enable True --lora_r 128 --lora_alpha 256 \
     --deepspeed scripts/zero3_offload.json \
