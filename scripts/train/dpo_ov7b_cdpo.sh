@@ -15,10 +15,12 @@ SFT_MODEL="lmms-lab/llava-onevision-qwen2-7b-ov"
 EPOCH=1
 beta=0.1
 
-DATA_PATH=$1
-OUTPUT_DIR=$2
+NUM_GPUS=$1
+DATA_PATH=$2
+OUTPUT_DIR=$3
+LEARNING_RATE=$4
 
-torchrun --nproc_per_node=2 \
+torchrun --nproc_per_node=$NUM_GPUS \
     llava/train/train_dpo.py \
     --lora_enable True --lora_r 128 --lora_alpha 256 \
     --deepspeed scripts/zero3_offload.json \
@@ -49,7 +51,7 @@ torchrun --nproc_per_node=2 \
     --evaluation_strategy "no" \
     --save_strategy "no" \
     --save_total_limit 1 \
-    --learning_rate $3 \
+    --learning_rate $LEARNING_RATE \
     --weight_decay 0. \
     --warmup_ratio 0.1 \
     --lr_scheduler_type "cosine" \
@@ -61,4 +63,5 @@ torchrun --nproc_per_node=2 \
     --lazy_preprocess True \
     --report_to wandb \
     --dataloader_drop_last True \
-    --hf_dataset "openbmb/RLAIF-V-Dataset:train"
+    --hf_dataset "openbmb/RLAIF-V-Dataset:train" \
+    ${@:5}
