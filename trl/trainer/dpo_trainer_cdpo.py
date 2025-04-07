@@ -1011,7 +1011,7 @@ class DPOTrainer(Trainer):
             unscaled_sft_loss = self.get_sft_loss(policy_chosen_logits, chosen_labels)
             sft_loss = unscaled_sft_loss * self.gamma
         else:
-            unscaled_sft_loss = 0
+            unscaled_sft_loss = torch.zeros_like(policy_chosen_logits[..., 0]).sum() * 0
             sft_loss = 0
 
         if self.noise_alpha > 0 and self.noise_loss_type.startswith('pos'):
