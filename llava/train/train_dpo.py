@@ -629,8 +629,9 @@ def preprocess_qwen(sources, tokenizer: transformers.PreTrainedTokenizer, has_im
             input_id += _input_id
             if role == "<|im_start|>user":
                 # _target = [im_start] + [IGNORE_INDEX] * (len(_input_id) - 3) + [im_end] + nl_tokens
-                _target = [IGNORE_INDEX] + [IGNORE_INDEX] * (len(_input_id) - 3) + [IGNORE_INDEX] + IGNORE_INDEX
+                _target = [IGNORE_INDEX] + [IGNORE_INDEX] * (len(_input_id) - 3) + [IGNORE_INDEX] + [IGNORE_INDEX]
             elif role == "<|im_start|>assistant":
+                # _target = [im_start] + [IGNORE_INDEX] * len(tokenizer(role).input_ids) + _input_id[len(tokenizer(role).input_ids) + 1: -2] + [im_end] + nl_tokens
                 _target = [IGNORE_INDEX] + [IGNORE_INDEX] * len(tokenizer(role).input_ids) + _input_id[len(tokenizer(role).input_ids) + 1 : -2] + [im_end] + nl_tokens
             else:
                 raise NotImplementedError
