@@ -1048,7 +1048,8 @@ class DPOTrainer(Trainer):
                 unscaled_noise_loss = -F.logsigmoid(
                     self.noise_beta * (chosen_logps.exp() - chosen_logps_noise.exp())).mean()
             elif self.noise_loss_type == 'pos_log':
-                unscaled_noise_loss = -F.logsigmoid((chosen_logps - chosen_logps_noise)).mean()
+                unscaled_noise_loss = -F.logsigmoid(
+                    self.noise_beta * (chosen_logps - chosen_logps_noise)).mean()
             else:
                 raise TypeError(f"Unknown noise loss type: {self.noise_loss_type}")
         elif self.noise_alpha > 0 and self.noise_loss_type.startswith('diff'):
