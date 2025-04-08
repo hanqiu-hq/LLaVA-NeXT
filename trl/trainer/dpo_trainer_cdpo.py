@@ -177,6 +177,7 @@ class DPOTrainer(Trainer):
         noise_beta: float = 1.0,
         noise_loss_type: str = "pos_exp",
         noise_step: int = 800,
+        detach_reject: bool = False,
         label_smoothing: float = 0,
         loss_type: Literal["sigmoid", "hinge", "ipo", "kto_pair"] = "sigmoid",
         args: Optional[TrainingArguments] = None,
@@ -329,6 +330,7 @@ class DPOTrainer(Trainer):
         self.noise_beta = noise_beta
         self.noise_loss_type = noise_loss_type
         self.noise_step = noise_step
+        self.detach_reject = detach_reject
         self.label_smoothing = label_smoothing
         self.loss_type = loss_type
 
@@ -998,6 +1000,9 @@ class DPOTrainer(Trainer):
             chosen_labels,
             rejected_labels,
         ) = self.concatenated_forward(model, batch)
+
+        if self.detach_reject:
+            policy_rejected_logps = policy_rejected_logps.detach()
 
         unscaled_dpo_losses, chosen_rewards, rejected_rewards = self.dpo_loss(
             policy_chosen_logps,
