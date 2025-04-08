@@ -195,6 +195,7 @@ class TrainingArguments(transformers.TrainingArguments):
     noise_loss_type: str = "pos_exp"
     noise_step: int = field(default=800)
     use_logits_to_keep: bool = field(default=False)
+    detach_reject: bool = field(default=False)
 
 
 def maybe_zero_3(param, ignore_status=False, name=None):
@@ -627,9 +628,10 @@ def preprocess_qwen(sources, tokenizer: transformers.PreTrainedTokenizer, has_im
                 _input_id = tokenizer(role).input_ids + nl_tokens + tokenizer(sentence["value"]).input_ids + [im_end] + nl_tokens
             input_id += _input_id
             if role == "<|im_start|>user":
-                _target = [im_start] + [IGNORE_INDEX] * (len(_input_id) - 3) + [im_end] + nl_tokens
+                # _target = [im_start] + [IGNORE_INDEX] * (len(_input_id) - 3) + [im_end] + nl_tokens
+                _target = [IGNORE_INDEX] + [IGNORE_INDEX] * (len(_input_id) - 3) + [IGNORE_INDEX] + IGNORE_INDEX
             elif role == "<|im_start|>assistant":
-                _target = [im_start] + [IGNORE_INDEX] * len(tokenizer(role).input_ids) + _input_id[len(tokenizer(role).input_ids) + 1 : -2] + [im_end] + nl_tokens
+                _target = [IGNORE_INDEX] + [IGNORE_INDEX] * len(tokenizer(role).input_ids) + _input_id[len(tokenizer(role).input_ids) + 1 : -2] + [im_end] + nl_tokens
             else:
                 raise NotImplementedError
             target += _target
