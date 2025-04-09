@@ -1002,7 +1002,12 @@ class DPOTrainer(Trainer):
         ) = self.concatenated_forward(model, batch)
 
         if self.detach_reject:
-            policy_rejected_logps = policy_rejected_logps.detach()
+            loss_mask = chosen_labels[:, 1:] != self.label_pad_token_id
+            chosen_probs = (policy_chosen_logps / loss_mask.sum(-1)).exp()
+            loss_mask = rejected_labels[:, 1:] != self.label_pad_token_id
+            rejected_probs = (policy_rejected_logps / loss_mask.sum(-1)).exp()
+            if ((chosen_probs - rejected_probs).abs() > 0.1).all():
+                policy_rejected_logps = policy_rejected_logps.detach()
 
         unscaled_dpo_losses, chosen_rewards, rejected_rewards = self.dpo_loss(
             policy_chosen_logps,
