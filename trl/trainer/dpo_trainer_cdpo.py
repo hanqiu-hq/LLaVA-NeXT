@@ -1003,9 +1003,9 @@ class DPOTrainer(Trainer):
 
         if self.detach_reject:
             loss_mask = chosen_labels[:, 1:] != self.label_pad_token_id
-            chosen_probs = (policy_chosen_logps / loss_mask.sum(-1)).exp()
+            chosen_probs = (reference_chosen_logps / loss_mask.sum(-1)).exp()
             loss_mask = rejected_labels[:, 1:] != self.label_pad_token_id
-            rejected_probs = (policy_rejected_logps / loss_mask.sum(-1)).exp()
+            rejected_probs = (reference_rejected_logps / loss_mask.sum(-1)).exp()
             if ((chosen_probs - rejected_probs).abs() > 0.1).all():
                 policy_rejected_logps = policy_rejected_logps.detach()
 
