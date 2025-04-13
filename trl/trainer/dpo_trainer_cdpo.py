@@ -1033,7 +1033,7 @@ class DPOTrainer(Trainer):
                     noise_image = [add_image_diffusion_noise(_image, self.noise_step) for _image in batch["images"]]
                 else:
                     noise_image = None
-                if self.noise_loss_type == "pos_dpo":
+                if self.noise_loss_type.startswith("pos_dpo"):
                     reference_chosen_logps_noise = self.batch_forward(
                         self.ref_model, batch, noise_image, average_log_prob=False)
                 else :
