@@ -1073,8 +1073,13 @@ class DPOTrainer(Trainer):
 
         if self.noise_alpha > 0 and self.noise_loss_type.startswith('pos'):
 
-            chosen_logps_noise = self.batch_forward(
-                model, batch, noise_image, average_log_prob=False)
+            if "detach" in self.noise_loss_type:
+                with torch.no_grad():
+                    chosen_logps_noise = self.batch_forward(
+                        model, batch, noise_image, average_log_prob=False)
+            else:
+                chosen_logps_noise = self.batch_forward(
+                    model, batch, noise_image, average_log_prob=False)
 
             # loss_mask = chosen_labels[:, 1:] != self.label_pad_token_id
             # chosen_logps = (policy_chosen_logps / loss_mask.sum(-1))
@@ -1090,6 +1095,12 @@ class DPOTrainer(Trainer):
                 unscaled_noise_loss = self.dpo_loss(
                     policy_chosen_logps,
                     chosen_logps_noise,
+                    reference_chosen_logps,
+                    reference_chosen_logps_noise)[0]
+            elif self.noise_loss_type == 'pos_dpo_detach':
+                unscaled_noise_loss = self.dpo_loss(
+                    policy_chosen_logps,
+                    chosen_logps_noise.detach(),
                     reference_chosen_logps,
                     reference_chosen_logps_noise)[0]
             else:
