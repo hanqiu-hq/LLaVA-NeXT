@@ -195,7 +195,9 @@ class TrainingArguments(transformers.TrainingArguments):
     noise_loss_type: str = "pos_exp"
     noise_step: int = field(default=800)
     use_logits_to_keep: bool = field(default=False)
-    detach_reject: bool = field(default=False)
+    detach_reject: int = field(default=-1)
+    reformulate_dpo: bool = field(default=False)
+    average_length: bool = field(default=False)
 
 
 def maybe_zero_3(param, ignore_status=False, name=None):
@@ -1806,6 +1808,9 @@ def train(attn_implementation=None):
         noise_loss_type=training_args.noise_loss_type,
         noise_step=training_args.noise_step,
         use_logits_to_keep=training_args.use_logits_to_keep,
+        detach_reject=training_args.detach_reject,
+        reformulate_dpo=training_args.reformulate_dpo,
+        average_length=training_args.average_length,
     )
 
     if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
