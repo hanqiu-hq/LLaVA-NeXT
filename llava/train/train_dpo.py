@@ -195,7 +195,7 @@ class TrainingArguments(transformers.TrainingArguments):
     noise_loss_type: str = "pos_exp"
     noise_step: int = field(default=800)
     use_logits_to_keep: bool = field(default=False)
-    detach_reject: int = field(default=-1)
+    detach_reject: float = field(default=-1)
     reformulate_dpo: bool = field(default=False)
     average_length: bool = field(default=False)
 

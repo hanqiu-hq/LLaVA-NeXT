@@ -207,7 +207,7 @@ class DPOTrainer(Trainer):
         noise_loss_type: str = "pos_exp",
         noise_step: int = 800,
         use_logits_to_keep: bool = False,
-        detach_reject: int = -1,
+        detach_reject: float = -1,
         reformulate_dpo: bool = False,
         average_length: bool = False,
     ):
