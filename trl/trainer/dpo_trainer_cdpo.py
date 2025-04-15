@@ -800,7 +800,7 @@ class DPOTrainer(Trainer):
         logits = pi_logratios - ref_logratios
 
         with torch.no_grad():
-            weight = - self.beta * F.sigmoid(-logits)
+            weight = - self.beta * F.sigmoid(-self.beta * logits)
 
         if self.average_length:
             weight = weight * (chosen_length + rejected_length) / 2
