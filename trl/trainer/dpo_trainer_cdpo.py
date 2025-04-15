@@ -1101,7 +1101,7 @@ class DPOTrainer(Trainer):
             rejected_length = (rejected_labels[:, 1:] != self.label_pad_token_id).sum(-1)
             chosen_probs = (policy_chosen_logps / chosen_length).exp()
             rejected_probs = (policy_rejected_logps / rejected_length).exp()
-            if ((chosen_probs - rejected_probs).abs() >= self.detach_reject).all():
+            if ((chosen_probs - rejected_probs).abs() <= self.detach_reject).all():
                 policy_rejected_logps = policy_rejected_logps.detach()
 
         if self.reformulate_dpo:
