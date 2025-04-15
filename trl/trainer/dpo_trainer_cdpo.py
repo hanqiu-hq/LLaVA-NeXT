@@ -209,7 +209,7 @@ class DPOTrainer(Trainer):
         use_logits_to_keep: bool = False,
         detach_reject: float = -1,
         reformulate_dpo: bool = False,
-        average_length: bool = False,
+        average_mode: Optional[str] = None,
     ):
         # import pdb;pdb.set_trace()
         if model_init_kwargs is None:
@@ -337,7 +337,7 @@ class DPOTrainer(Trainer):
         self.use_logits_to_keep = use_logits_to_keep
         self.detach_reject = detach_reject
         self.reformulate_dpo = reformulate_dpo
-        self.average_length = average_length
+        self.average_mode = average_mode
 
         self._stored_metrics = defaultdict(lambda: defaultdict(list))
 
@@ -802,11 +802,16 @@ class DPOTrainer(Trainer):
         with torch.no_grad():
             weight = - self.beta * F.sigmoid(-self.beta * logits)
 
-        if self.average_length:
+        if self.average_mode == "average":
             weight = weight * (chosen_length + rejected_length) / 2
             losses = weight * (policy_chosen_logps / chosen_length - policy_rejected_logps / rejected_length)
-        else:
+        elif self.average_mode == "mean":
+            weight = weight / self.beta
+            losses = weight * (policy_chosen_logps / chosen_length - policy_rejected_logps / rejected_length)
+        elif self.average_mode is None:
             losses = weight * (policy_chosen_logps - policy_rejected_logps)
+        else:
+            raise NotImplementedError("Unknown average mode: %s" % self.average_mode)
 
         # The beta is a temperature parameter for the DPO loss, typically something in the range of 0.1 to 0.5.
         # We ignore the reference model as beta -> 0. The label_smoothing parameter encodes our uncertainty about the labels and

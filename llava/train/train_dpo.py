@@ -197,7 +197,7 @@ class TrainingArguments(transformers.TrainingArguments):
     use_logits_to_keep: bool = field(default=False)
     detach_reject: float = field(default=-1)
     reformulate_dpo: bool = field(default=False)
-    average_length: bool = field(default=False)
+    average_mode: str = field(default=None)
 
 
 def maybe_zero_3(param, ignore_status=False, name=None):
@@ -1810,7 +1810,7 @@ def train(attn_implementation=None):
         use_logits_to_keep=training_args.use_logits_to_keep,
         detach_reject=training_args.detach_reject,
         reformulate_dpo=training_args.reformulate_dpo,
-        average_length=training_args.average_length,
+        average_mode=training_args.average_mode,
     )
 
     if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
