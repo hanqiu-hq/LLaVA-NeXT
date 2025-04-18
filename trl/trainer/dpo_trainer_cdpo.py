@@ -800,7 +800,15 @@ class DPOTrainer(Trainer):
         logits = pi_logratios - ref_logratios
 
         with torch.no_grad():
-            weight = - self.beta * F.sigmoid(-self.beta * logits)
+            if self.average_mode == "average_weight":
+                logits_for_weight = (policy_chosen_logps - reference_chosen_logps) / chosen_length - (policy_rejected_logps - reference_rejected_logps) / rejected_length
+                logits_for_weight = logits_for_weight * (chosen_length + rejected_length) / 2
+                weight = - self.beta * F.sigmoid(-self.beta * logits_for_weight)
+            elif self.average_mode == "mean_weight":
+                logits_for_weight = (policy_chosen_logps - reference_chosen_logps) / chosen_length - (policy_rejected_logps - reference_rejected_logps) / rejected_length
+                weight = - self.beta * F.sigmoid(-logits_for_weight)
+            else:
+                weight = - self.beta * F.sigmoid(-self.beta * logits)
 
         if self.average_mode == "average":
             weight = weight * (chosen_length + rejected_length) / 2
@@ -808,10 +816,8 @@ class DPOTrainer(Trainer):
         elif self.average_mode == "mean":
             weight = weight / self.beta
             losses = weight * (policy_chosen_logps / chosen_length - policy_rejected_logps / rejected_length)
-        elif self.average_mode is None:
-            losses = weight * (policy_chosen_logps - policy_rejected_logps)
         else:
-            raise NotImplementedError("Unknown average mode: %s" % self.average_mode)
+            losses = weight * (policy_chosen_logps - policy_rejected_logps)
 
         # The beta is a temperature parameter for the DPO loss, typically something in the range of 0.1 to 0.5.
         # We ignore the reference model as beta -> 0. The label_smoothing parameter encodes our uncertainty about the labels and
