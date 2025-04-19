@@ -806,7 +806,7 @@ class DPOTrainer(Trainer):
                 weight = - self.beta * F.sigmoid(-self.beta * logits_for_weight)
             elif self.average_mode == "mean_weight":
                 logits_for_weight = (policy_chosen_logps - reference_chosen_logps) / chosen_length - (policy_rejected_logps - reference_rejected_logps) / rejected_length
-                weight = - self.beta * F.sigmoid(-logits_for_weight)
+                weight = - self.beta * F.sigmoid(- 1.2 * logits_for_weight)
             else:
                 weight = - self.beta * F.sigmoid(-self.beta * logits)
 
