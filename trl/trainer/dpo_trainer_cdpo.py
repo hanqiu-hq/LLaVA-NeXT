@@ -778,6 +778,8 @@ class DPOTrainer(Trainer):
         reference_rejected_logps: torch.FloatTensor,
         chosen_length: torch.Tensor,
         rejected_length: torch.Tensor,
+        chosen_weight: float = 1,
+        rejected_weight: float = 1,
     ) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
         """Compute the DPO loss for a batch of policy and reference model log probabilities.
 
@@ -806,7 +808,7 @@ class DPOTrainer(Trainer):
                 weight = - self.beta * F.sigmoid(-self.beta * logits_for_weight)
             elif self.average_mode == "mean_weight":
                 logits_for_weight = (policy_chosen_logps - reference_chosen_logps) / chosen_length - (policy_rejected_logps - reference_rejected_logps) / rejected_length
-                weight = - self.beta * F.sigmoid(- 1.2 * logits_for_weight)
+                weight = - self.beta * F.sigmoid(- logits_for_weight)
             else:
                 weight = - self.beta * F.sigmoid(-self.beta * logits)
 
@@ -817,7 +819,7 @@ class DPOTrainer(Trainer):
             weight = weight / self.beta
             losses = weight * (policy_chosen_logps / chosen_length - policy_rejected_logps / rejected_length)
         else:
-            losses = weight * (policy_chosen_logps - policy_rejected_logps)
+            losses = weight * (chosen_weight * policy_chosen_logps - rejected_weight * policy_rejected_logps)
 
         # The beta is a temperature parameter for the DPO loss, typically something in the range of 0.1 to 0.5.
         # We ignore the reference model as beta -> 0. The label_smoothing parameter encodes our uncertainty about the labels and
@@ -1118,6 +1120,18 @@ class DPOTrainer(Trainer):
         if self.reformulate_dpo:
             chosen_length = (chosen_labels[:, 1:] != self.label_pad_token_id).sum(-1)
             rejected_length = (rejected_labels[:, 1:] != self.label_pad_token_id).sum(-1)
+            if self.noise_loss_type == "noise_diff_weight":
+                with torch.no_grad():
+                    chosen_probs = (policy_chosen_logps / chosen_length).exp()
+                    rejected_probs = (policy_rejected_logps / rejected_length).exp()
+                    chosen_probs_noise, rejected_probs_noise = self.concatenated_forward(
+                        model, batch, noise_forward=True)
+                    chosen_weight = 1 + (chosen_probs - chosen_probs_noise)
+                    rejected_weight = 1 - (rejected_probs - rejected_probs_noise)
+            else:
+                chosen_weight = 1
+                rejected_weight = 1
+
             unscaled_dpo_losses, chosen_rewards, rejected_rewards = self.dpo_loss_reform(
                 policy_chosen_logps,
                 policy_rejected_logps,
@@ -1125,6 +1139,8 @@ class DPOTrainer(Trainer):
                 reference_rejected_logps,
                 chosen_length,
                 rejected_length,
+                chosen_weight,
+                rejected_weight
             )
         else:
             unscaled_dpo_losses, chosen_rewards, rejected_rewards = self.dpo_loss(
