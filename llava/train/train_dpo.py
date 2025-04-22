@@ -191,7 +191,7 @@ class TrainingArguments(transformers.TrainingArguments):
     generate_during_eval: bool = field(default=False)
     precompute_ref_log_probs: bool = field(default=False)
     noise_alpha: float = field(default=0.0)
-    noise_beta: float = field(default=1.0)
+    noise_beta: float = field(default=0.0)
     noise_loss_type: str = "pos_exp"
     noise_step: int = field(default=800)
     use_logits_to_keep: bool = field(default=False)

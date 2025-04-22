@@ -203,7 +203,7 @@ class DPOTrainer(Trainer):
         ref_adapter_name: Optional[str] = None,
         reference_free: bool = False,
         noise_alpha: float = 0.0,
-        noise_beta: float = 1.0,
+        noise_beta: float = 0.0,
         noise_loss_type: str = "pos_exp",
         noise_step: int = 800,
         use_logits_to_keep: bool = False,
@@ -1116,7 +1116,7 @@ class DPOTrainer(Trainer):
                         self.ref_model, batch
                     )[:2]
 
-                if self.noise_alpha > 0:
+                if self.noise_alpha > 0 or self.noise_beta > 0:
                     noise_image = [add_image_diffusion_noise(_image, self.noise_step) for _image in batch["images"]]
                 else:
                     noise_image = None
