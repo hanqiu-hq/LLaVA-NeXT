@@ -1145,10 +1145,13 @@ class DPOTrainer(Trainer):
 
         if self.reformulate_dpo:
             if self.noise_loss_type.startswith("reform_weight"):
-                with (torch.no_grad()):
+                with torch.no_grad():
                     chosen_logps_noise_per_token, rejected_logps_noise_per_token = self.concatenated_forward(model, batch, noise_forward=True)[2:]
                     chosen_weight = (policy_chosen_logps_per_token.exp() - chosen_logps_noise_per_token.exp()) * self.noise_beta
                     rejected_weight = (policy_rejected_logps_per_token.exp() - rejected_logps_noise_per_token.exp()) * self.noise_beta
+                    if self.noise_loss_type == "reform_weight_clip":
+                        chosen_weight = chosen_weight.clamp(min=0, max=0.2)
+                        rejected_weight = chosen_weight.clamp(min=0, max=0.2)
             else:
                 chosen_weight = 0
                 rejected_weight = 0
