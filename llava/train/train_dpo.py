@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 import json
 import logging
 import pathlib
-from typing import Dict, Optional, Sequence, List
+from typing import Dict, Optional, Sequence, List, Union, Tuple
 import ast
 
 import yaml
@@ -124,12 +124,11 @@ class ModelArguments:
     use_pos_skipping: Optional[bool] = field(default=False)
     pos_skipping_range: Optional[int] = field(default=4096)
 
-
     mm_newline_position: Optional[str] = field(default="grid")
     delay_load: Optional[bool] = field(default=True)
     add_faster_video: Optional[bool] = field(default=False)
     faster_token_stride: Optional[int] = field(default=10)
-
+    lora_skip_keys: Optional[str] = field(default="lm_head,mm_projector,vision_tower")
 
 
 @dataclass
@@ -153,6 +152,8 @@ class DataArguments:
     force_sample: Optional[bool] = field(default=False)
     shuffle_data: Optional[bool] = field(default=False)
     hf_dataset: Optional[str] = field(default=None)
+    image_max_pixels: Optional[int] = field(default=None)
+    image_min_pixels: Optional[int] = field(default=None)
 
 
 @dataclass
@@ -191,11 +192,9 @@ class TrainingArguments(transformers.TrainingArguments):
     generate_during_eval: bool = field(default=False)
     precompute_ref_log_probs: bool = field(default=False)
     noise_alpha: float = field(default=0.0)
-    noise_beta: float = field(default=1.0)
-    noise_loss_type: str = "pos_exp"
+    noise_beta: float = field(default=0.0)
+    noise_loss_type: str = field(default="")
     noise_step: int = field(default=800)
-    use_logits_to_keep: bool = field(default=False)
-    detach_reject: float = field(default=-1)
     reformulate_dpo: bool = field(default=False)
     average_mode: str = field(default=None)
 
@@ -255,18 +254,17 @@ def get_mm_adapter_state_maybe_zero_3(named_params, keys_to_match):
     return to_return
 
 
-def find_all_linear_names(model):
+def find_all_linear_names(model, lora_skip_keys):
     cls = torch.nn.Linear
     lora_module_names = set()
-    multimodal_keywords = ["mm_projector", "vision_tower", "vision_resampler"]
+    # multimodal_keywords = ["mm_projector", "vision_tower", "vision_resampler"]
+    lora_skip_keys = lora_skip_keys.split(",")
     for name, module in model.named_modules():
-        if any(mm_keyword in name for mm_keyword in multimodal_keywords):
+        if any(keyword in name for keyword in lora_skip_keys):
             continue
         if isinstance(module, cls):
             # names = name.split(".")
             # lora_module_names.add(names[0] if len(names) == 1 else names[-1])
-            if "lm_head" in name:
-                continue
             lora_module_names.add(name)
 
     if "lm_head" in lora_module_names:  # needed for 16-bit
@@ -1021,6 +1019,9 @@ class DPODataset(Dataset):
         else:
             self.hf_dataset = None
 
+        self.image_max_pixels = data_args.image_max_pixels
+        self.image_min_pixels = data_args.image_min_pixels
+
     def __len__(self):
         return len(self.list_data_dict)
 
@@ -1046,6 +1047,25 @@ class DPODataset(Dataset):
             length_list.append(cur_len)
         return length_list
 
+    def _preprocess_image(
+        self, image: "ImageObject", image_max_pixels: int, image_min_pixels: int, **kwargs
+    ) -> "ImageObject":
+        r"""Pre-process a single image."""
+        if (image.width * image.height) > image_max_pixels:
+            resize_factor = math.sqrt(image_max_pixels / (image.width * image.height))
+            width, height = int(image.width * resize_factor), int(image.height * resize_factor)
+            image = image.resize((width, height))
+
+        if (image.width * image.height) < image_min_pixels:
+            resize_factor = math.sqrt(image_min_pixels / (image.width * image.height))
+            width, height = int(image.width * resize_factor), int(image.height * resize_factor)
+            image = image.resize((width, height))
+
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+
+        return image
+
     def process_image(self, image_file):
         image_folder = self.data_args.image_folder
         processor = self.data_args.image_processor
@@ -1060,6 +1080,10 @@ class DPODataset(Dataset):
         except Exception as exn:
             print(f"Failed to open image {image_file}. Exception:", exn)
             raise exn
+
+        if self.image_max_pixels is not None and self.image_min_pixels is not None:
+            image = self._preprocess_image(
+                image, image_max_pixels=self.image_max_pixels, image_min_pixels=self.image_min_pixels)
 
         image_size = image.size
         if self.data_args.image_aspect_ratio == "highres":
@@ -1602,7 +1626,7 @@ def train(attn_implementation=None):
         lora_config = LoraConfig(
             r=training_args.lora_r,
             lora_alpha=training_args.lora_alpha,
-            target_modules=find_all_linear_names(model),
+            target_modules=find_all_linear_names(model, model_args.lora_skip_keys),
             lora_dropout=training_args.lora_dropout,
             bias=training_args.lora_bias,
             task_type="CAUSAL_LM",
@@ -1682,7 +1706,11 @@ def train(attn_implementation=None):
         model.config.tokenizer_model_max_length = tokenizer.model_max_length
 
         ### Deciding train which part of the model
-        if model_args.mm_tunable_parts is None:  # traditional way of deciding which part to train
+        if training_args.lora_enable:
+            model.config.unfreeze_mm_vision_tower = model_args.unfreeze_mm_vision_tower
+            if model_args.unfreeze_mm_vision_tower:
+                vision_tower.requires_grad_(True)
+        elif model_args.mm_tunable_parts is None:  # traditional way of deciding which part to train
             model.config.tune_mm_mlp_adapter = training_args.tune_mm_mlp_adapter = model_args.tune_mm_mlp_adapter
             model.config.tune_mm_vision_resampler = training_args.tune_mm_vision_resampler = model_args.tune_mm_vision_resampler
             if model_args.tune_mm_mlp_adapter or model_args.tune_mm_vision_resampler:
@@ -1709,7 +1737,6 @@ def train(attn_implementation=None):
                 vision_tower.requires_grad_(True)
             else:
                 vision_tower.requires_grad_(False)
-
         else:
             rank0_print(f"Using mm_tunable_parts: {model_args.mm_tunable_parts}")
             model.config.mm_tunable_parts = training_args.mm_tunable_parts = model_args.mm_tunable_parts
@@ -1737,6 +1764,7 @@ def train(attn_implementation=None):
 
         total_params = sum(p.ds_numel if hasattr(p, "ds_numel") else p.numel() for p in model.parameters())
         trainable_params = sum(p.ds_numel if hasattr(p, "ds_numel") else p.numel() for p in model.parameters() if p.requires_grad)
+        print([n for n, p in model.named_parameters() if p.requires_grad])
         rank0_print(f"Total parameters: ~{total_params/1e6:.2f} MB)")
         rank0_print(f"Trainable parameters: ~{trainable_params/1e6:.2f} MB)")
         if training_args.bits in [4, 8]:
@@ -1807,8 +1835,6 @@ def train(attn_implementation=None):
         noise_beta=training_args.noise_beta,
         noise_loss_type=training_args.noise_loss_type,
         noise_step=training_args.noise_step,
-        use_logits_to_keep=training_args.use_logits_to_keep,
-        detach_reject=training_args.detach_reject,
         reformulate_dpo=training_args.reformulate_dpo,
         average_mode=training_args.average_mode,
     )

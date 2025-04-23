@@ -202,12 +202,11 @@ class DPOTrainer(Trainer):
         model_adapter_name: Optional[str] = None,
         ref_adapter_name: Optional[str] = None,
         reference_free: bool = False,
+        # newly add parameters for cdpo
         noise_alpha: float = 0.0,
-        noise_beta: float = 1.0,
-        noise_loss_type: str = "pos_exp",
+        noise_beta: float = 0.0,
         noise_step: int = 800,
-        use_logits_to_keep: bool = False,
-        detach_reject: float = -1,
+        noise_loss_type: str = "",
         reformulate_dpo: bool = False,
         average_mode: Optional[str] = None,
     ):
@@ -334,8 +333,6 @@ class DPOTrainer(Trainer):
         self.noise_beta = noise_beta
         self.noise_loss_type = noise_loss_type
         self.noise_step = noise_step
-        self.use_logits_to_keep = use_logits_to_keep
-        self.detach_reject = detach_reject
         self.reformulate_dpo = reformulate_dpo
         self.average_mode = average_mode
 
@@ -682,22 +679,12 @@ class DPOTrainer(Trainer):
         compte_ref_context_manager = torch.cuda.amp.autocast if self._peft_has_been_casted_to_bf16 else nullcontext
 
         # compute reference logps
-        with torch.no_grad(), compte_ref_context_manager():
+        with ((torch.no_grad(), compte_ref_context_manager())):
             if self.ref_model is None:
                 with self.null_ref_context():
-                    (
-                        reference_chosen_logps,
-                        reference_rejected_logps,
-                        _,
-                        _,
-                    ) = self.concatenated_forward(self.model, padded_batch)
+                    reference_chosen_logps, reference_rejected_logps = self.concatenated_forward(self.model, padded_batch)[:2]
             else:
-                (
-                    reference_chosen_logps,
-                    reference_rejected_logps,
-                    _,
-                    _,
-                ) = self.concatenated_forward(self.ref_model, padded_batch)
+                reference_chosen_logps, reference_rejected_logps = self.concatenated_forward(self.ref_model, padded_batch)[:2]
 
         return reference_chosen_logps, reference_rejected_logps
 
@@ -769,17 +756,16 @@ class DPOTrainer(Trainer):
         concatenated_batch["modalities"] = batch["modalities"] * 2
         return concatenated_batch
 
-
     def dpo_loss_reform(
         self,
-        policy_chosen_logps: torch.FloatTensor,
-        policy_rejected_logps: torch.FloatTensor,
+        policy_chosen_logps_per_token: torch.FloatTensor,
+        policy_rejected_logps_per_token: torch.FloatTensor,
         reference_chosen_logps: torch.FloatTensor,
         reference_rejected_logps: torch.FloatTensor,
         chosen_length: torch.Tensor,
         rejected_length: torch.Tensor,
-        chosen_weight: float = 1,
-        rejected_weight: float = 1,
+        chosen_weight: torch.Tensor = 0,
+        rejected_weight: torch.Tensor = 0,
     ) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
         """Compute the DPO loss for a batch of policy and reference model log probabilities.
 
@@ -794,6 +780,11 @@ class DPOTrainer(Trainer):
             The losses tensor contains the DPO loss for each example in the batch.
             The chosen_rewards and rejected_rewards tensors contain the rewards for the chosen and rejected responses, respectively.
         """
+        policy_chosen_logps = policy_chosen_logps_per_token.sum(-1)
+        policy_rejected_logps = policy_rejected_logps_per_token.sum(-1)
+        policy_chosen_loss_term = (policy_chosen_logps_per_token * (1 + chosen_weight)).sum(-1)
+        policy_rejected_loss_term = (policy_rejected_logps_per_token * (1 - rejected_weight)).sum(-1)
+
         pi_logratios = policy_chosen_logps - policy_rejected_logps
         ref_logratios = reference_chosen_logps - reference_rejected_logps
 
@@ -814,12 +805,15 @@ class DPOTrainer(Trainer):
 
         if self.average_mode == "average":
             weight = weight * (chosen_length + rejected_length) / 2
-            losses = weight * (policy_chosen_logps / chosen_length - policy_rejected_logps / rejected_length)
+            losses = weight * (policy_chosen_loss_term / chosen_length - policy_rejected_loss_term / rejected_length)
         elif self.average_mode == "mean":
             weight = weight / self.beta
-            losses = weight * (policy_chosen_logps / chosen_length - policy_rejected_logps / rejected_length)
+            losses = weight * (policy_chosen_loss_term / chosen_length - policy_rejected_loss_term / rejected_length)
+        elif self.average_mode == "mean_both":
+            weight = weight / self.beta
+            losses = weight * (policy_chosen_loss_term - policy_rejected_loss_term) / ((chosen_length + rejected_length) / 2)
         else:
-            losses = weight * (chosen_weight * policy_chosen_logps - rejected_weight * policy_rejected_logps)
+            losses = weight * (policy_chosen_loss_term - policy_rejected_loss_term)
 
         # The beta is a temperature parameter for the DPO loss, typically something in the range of 0.1 to 0.5.
         # We ignore the reference model as beta -> 0. The label_smoothing parameter encodes our uncertainty about the labels and
@@ -829,7 +823,6 @@ class DPOTrainer(Trainer):
         rejected_rewards = self.beta * (policy_rejected_logps.to(self.accelerator.device) - reference_rejected_logps.to(self.accelerator.device)).detach()
 
         return losses, chosen_rewards, rejected_rewards
-
 
     def dpo_loss(
         self,
@@ -904,7 +897,7 @@ class DPOTrainer(Trainer):
         average_log_prob: bool = False,
         label_pad_token_id: int = -100,
         is_encoder_decoder: bool = False,
-    ) -> torch.FloatTensor:
+    ) -> (torch.FloatTensor, torch.FloatTensor):
         """Compute the log probabilities of the given labels under the given logits.
 
         Args:
@@ -924,12 +917,6 @@ class DPOTrainer(Trainer):
             labels = labels[:, 1:].clone()
             logits = logits[:, :-1, :]
 
-        if self.use_logits_to_keep:
-            first_compute_index = labels.ne(self.label_pad_token_id).nonzero(as_tuple=True)[1].min()
-            logits_to_keep = (labels.shape[1] - first_compute_index).item() + 1
-            labels = labels[:, -logits_to_keep:]
-            logits = logits[:, -logits_to_keep:]
-
         loss_mask = labels != label_pad_token_id
 
         # dummy token; we'll ignore the losses on these tokens later
@@ -938,19 +925,14 @@ class DPOTrainer(Trainer):
         per_token_logps = torch.gather(logits.log_softmax(-1), dim=2, index=labels.unsqueeze(2)).squeeze(2)
 
         if average_log_prob:
-            return (per_token_logps * loss_mask).sum(-1) / loss_mask.sum(-1)
+            return (per_token_logps * loss_mask).sum(-1) / loss_mask.sum(-1), per_token_logps * loss_mask
         else:
-            return (per_token_logps * loss_mask).sum(-1)
+            return (per_token_logps * loss_mask).sum(-1), per_token_logps * loss_mask
 
     def get_sft_loss(self, logits, labels):
         # Shift so that tokens < n predict n
         shift_logits = logits[..., :-1, :].contiguous()
         shift_labels = labels[..., 1:].contiguous()
-        if self.use_logits_to_keep:
-            first_compute_index = shift_labels.ne(self.label_pad_token_id).nonzero(as_tuple=True)[1].min()
-            logits_to_keep = (shift_labels.shape[1] - first_compute_index).item() + 1
-            shift_logits = shift_logits[:, -logits_to_keep:]
-            shift_labels = shift_labels[:, -logits_to_keep:]
 
         # Flatten the tokens
         loss_fct = nn.CrossEntropyLoss()
@@ -965,7 +947,7 @@ class DPOTrainer(Trainer):
         self,
         model: nn.Module,
         batch: Dict[str, Union[List, torch.LongTensor]],
-        noise_image=None,
+        noise_images=None,
         average_log_prob=False,
     ) -> torch.FloatTensor:
         """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
@@ -973,8 +955,8 @@ class DPOTrainer(Trainer):
         We do this to avoid doing two forward passes, because it's faster for FSDP.
         """
         batch = deepcopy(batch)
-        if noise_image is not None:
-            batch["images"] = noise_image
+        if noise_images is not None:
+            batch["images"] = noise_images
 
         logits, new_labels = model(
             batch["chosen_input_ids"],
@@ -988,7 +970,7 @@ class DPOTrainer(Trainer):
         )
         logits = logits.to(torch.float32)
 
-        logps = self.get_batch_logps(
+        logps, _ = self.get_batch_logps(
             logits,
             new_labels,
             average_log_prob=average_log_prob,
@@ -997,7 +979,12 @@ class DPOTrainer(Trainer):
         )
         return logps
 
-    def concatenated_forward(self, model: nn.Module, batch: Dict[str, Union[List, torch.LongTensor]], noise_forward=False) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+    def concatenated_forward(
+        self,
+        model: nn.Module,
+        batch: Dict[str, Union[List, torch.LongTensor]],
+        noise_images=None
+    ) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
         """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
 
         We do this to avoid doing two forward passes, because it's faster for FSDP.
@@ -1012,10 +999,8 @@ class DPOTrainer(Trainer):
         )
         len_chosen = batch["chosen_labels"].shape[0]
 
-        if noise_forward:
-            concatenated_batch["concatenated_images"] = [
-                add_image_diffusion_noise(_image, self.noise_step)
-                for _image in concatenated_batch["concatenated_images"]]
+        if noise_images is not None:
+            concatenated_batch["concatenated_images"] = noise_images * 2
 
         # import pdb; pdb.set_trace()
         all_logits, new_labels = model(
@@ -1030,19 +1015,21 @@ class DPOTrainer(Trainer):
         )
         all_logits = all_logits.to(torch.float32)
 
-        if noise_forward:
-            all_probs = self.get_batch_logps(
+        if noise_images is not None:
+            noise_logps, noise_logps_per_token = self.get_batch_logps(
                 all_logits,
                 new_labels,
                 average_log_prob=True,
                 is_encoder_decoder=self.is_encoder_decoder,
                 label_pad_token_id=self.label_pad_token_id,
-            ).exp()
-            chosen_probs_noise = all_probs[:len_chosen]
-            rejected_probs_noise = all_probs[len_chosen:]
-            return chosen_probs_noise, rejected_probs_noise
+            )
+            chosen_logps_noise = noise_logps[:len_chosen]
+            rejected_logps_noise = noise_logps[len_chosen:]
+            chosen_logps_noise_per_token = noise_logps_per_token[:len_chosen]
+            rejected_logps_noise_per_token = noise_logps_per_token[len_chosen:]
+            return chosen_logps_noise, rejected_logps_noise, chosen_logps_noise_per_token, rejected_logps_noise_per_token
 
-        all_logps = self.get_batch_logps(
+        all_logps, all_logps_per_token = self.get_batch_logps(
             all_logits,
             new_labels,
             average_log_prob=self.loss_type == "ipo",
@@ -1053,10 +1040,13 @@ class DPOTrainer(Trainer):
         chosen_logps = all_logps[:len_chosen]
         rejected_logps = all_logps[len_chosen:]
 
+        chosen_logps_per_token = all_logps_per_token[:len_chosen]
+        rejected_logps_per_token = all_logps_per_token[len_chosen:]
+
         chosen_labels = new_labels[:len_chosen]
         rejected_labels = new_labels[len_chosen:]
 
-        return (chosen_logps, rejected_logps, chosen_labels, rejected_labels)
+        return (chosen_logps, rejected_logps, chosen_labels, rejected_labels, chosen_logps_per_token, rejected_logps_per_token)
 
     def get_batch_loss_metrics(
         self,
@@ -1092,55 +1082,44 @@ class DPOTrainer(Trainer):
                         self.ref_model, batch
                     )[:2]
 
-                if self.noise_alpha > 0:
-                    noise_image = [add_image_diffusion_noise(_image, self.noise_step) for _image in batch["images"]]
-                else:
-                    noise_image = None
-                if self.noise_loss_type.startswith("pos_dpo"):
-                    reference_chosen_logps_noise = self.batch_forward(
-                        self.ref_model, batch, noise_image, average_log_prob=False)
-                else :
-                    reference_chosen_logps_noise = None
+        if self.noise_loss_type != "":
+            noise_images = [add_image_diffusion_noise(_image, self.noise_step) for _image in batch["images"]]
+        else:
+            noise_images = None
 
         (
             policy_chosen_logps,
             policy_rejected_logps,
             chosen_labels,
             rejected_labels,
+            policy_chosen_logps_per_token,
+            policy_rejected_logps_per_token,
         ) = self.concatenated_forward(model, batch)
 
-        if self.detach_reject > -1:
-            chosen_length = (chosen_labels[:, 1:] != self.label_pad_token_id).sum(-1)
-            rejected_length = (rejected_labels[:, 1:] != self.label_pad_token_id).sum(-1)
-            chosen_probs = (policy_chosen_logps / chosen_length).exp()
-            rejected_probs = (policy_rejected_logps / rejected_length).exp()
-            if ((chosen_probs - rejected_probs).abs() <= self.detach_reject).all():
-                policy_rejected_logps = policy_rejected_logps.detach()
-
         if self.reformulate_dpo:
+            if self.noise_loss_type.startswith("reform_weight"):
+                with torch.no_grad():
+                    chosen_logps_noise_per_token, rejected_logps_noise_per_token = self.concatenated_forward(model, batch, noise_images=noise_images)[2:]
+                    chosen_weight = (policy_chosen_logps_per_token.exp() - chosen_logps_noise_per_token.exp()) * self.noise_beta
+                    rejected_weight = (policy_rejected_logps_per_token.exp() - rejected_logps_noise_per_token.exp()) * self.noise_beta
+                    if self.noise_loss_type == "reform_weight_clip":
+                        chosen_weight = chosen_weight.clamp(min=0, max=0.2)
+                        rejected_weight = chosen_weight.clamp(min=0, max=0.2)
+            else:
+                chosen_weight = 0
+                rejected_weight = 0
+
             chosen_length = (chosen_labels[:, 1:] != self.label_pad_token_id).sum(-1)
             rejected_length = (rejected_labels[:, 1:] != self.label_pad_token_id).sum(-1)
-            if self.noise_loss_type == "noise_diff_weight":
-                with torch.no_grad():
-                    chosen_probs = (policy_chosen_logps / chosen_length).exp()
-                    rejected_probs = (policy_rejected_logps / rejected_length).exp()
-                    chosen_probs_noise, rejected_probs_noise = self.concatenated_forward(
-                        model, batch, noise_forward=True)
-                    chosen_weight = 1 + (chosen_probs - chosen_probs_noise)
-                    rejected_weight = 1 - (rejected_probs - rejected_probs_noise)
-            else:
-                chosen_weight = 1
-                rejected_weight = 1
-
             unscaled_dpo_losses, chosen_rewards, rejected_rewards = self.dpo_loss_reform(
-                policy_chosen_logps,
-                policy_rejected_logps,
+                policy_chosen_logps_per_token,
+                policy_rejected_logps_per_token,
                 reference_chosen_logps,
                 reference_rejected_logps,
                 chosen_length,
                 rejected_length,
                 chosen_weight,
-                rejected_weight
+                rejected_weight,
             )
         else:
             unscaled_dpo_losses, chosen_rewards, rejected_rewards = self.dpo_loss(
@@ -1163,10 +1142,10 @@ class DPOTrainer(Trainer):
             if "detach" in self.noise_loss_type:
                 with torch.no_grad():
                     chosen_logps_noise = self.batch_forward(
-                        model, batch, noise_image, average_log_prob=False)
+                        model, batch, noise_images, average_log_prob=False)
             else:
                 chosen_logps_noise = self.batch_forward(
-                    model, batch, noise_image, average_log_prob=False)
+                    model, batch, noise_images, average_log_prob=False)
 
             chosen_logps = policy_chosen_logps
 
@@ -1177,12 +1156,18 @@ class DPOTrainer(Trainer):
                 unscaled_noise_loss = -F.logsigmoid(
                     self.noise_beta * (chosen_logps - chosen_logps_noise)).mean()
             elif self.noise_loss_type == 'pos_dpo':
+                with torch.no_grad():
+                    reference_chosen_logps_noise = self.batch_forward(
+                        self.ref_model, batch, noise_images, average_log_prob=False)
                 unscaled_noise_loss = self.dpo_loss(
                     policy_chosen_logps,
                     chosen_logps_noise,
                     reference_chosen_logps,
                     reference_chosen_logps_noise)[0]
             elif self.noise_loss_type == 'pos_dpo_detach':
+                with torch.no_grad():
+                    reference_chosen_logps_noise = self.batch_forward(
+                        self.ref_model, batch, noise_images, average_log_prob=False)
                 unscaled_noise_loss = self.dpo_loss(
                     policy_chosen_logps,
                     chosen_logps_noise.detach(),
@@ -1195,10 +1180,10 @@ class DPOTrainer(Trainer):
             chosen_probs = (policy_chosen_logps / loss_mask.sum(-1)).exp()
             loss_mask = rejected_labels[:, 1:] != self.label_pad_token_id
             rejected_probs = (policy_rejected_logps / loss_mask.sum(-1)).exp()
-            chosen_probs_noise, rejected_probs_noise = self.concatenated_forward(
-                model, batch, noise_forward=True)
+            chosen_logps_noise, rejected_logps_noise = self.concatenated_forward(
+                model, batch, noise_images=noise_images)[:2]
             unscaled_noise_loss = -F.logsigmoid(self.noise_beta * (
-                ((chosen_probs - chosen_probs_noise) - (rejected_probs - rejected_probs_noise)))).mean()
+                ((chosen_probs - chosen_logps_noise.exp()) - (rejected_probs - rejected_logps_noise.exp())))).mean()
         else:
             unscaled_noise_loss = 0
 
