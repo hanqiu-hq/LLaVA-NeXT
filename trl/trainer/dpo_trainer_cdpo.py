@@ -1102,9 +1102,12 @@ class DPOTrainer(Trainer):
                     chosen_logps_noise_per_token, rejected_logps_noise_per_token = self.concatenated_forward(model, batch, noise_images=noise_images)[2:]
                     chosen_weight = (policy_chosen_logps_per_token.exp() - chosen_logps_noise_per_token.exp()) * self.noise_beta
                     rejected_weight = (policy_rejected_logps_per_token.exp() - rejected_logps_noise_per_token.exp()) * self.noise_beta
-                    if self.noise_loss_type == "reform_weight_clip":
-                        chosen_weight = chosen_weight.clamp(min=0, max=0.2)
-                        rejected_weight = chosen_weight.clamp(min=0, max=0.2)
+                    if self.noise_loss_type.startswith("reform_weight_clip"):
+                        import re
+                        match = re.search(r'_(\d+)_(\d+)$', self.noise_loss_type)
+                        min_weight, max_weight = int(match.group(1)) / 10, int(match.group(2)) / 10
+                        chosen_weight = chosen_weight.clamp(min=min_weight, max=max_weight)
+                        rejected_weight = chosen_weight.clamp(min=min_weight, max=max_weight)
             else:
                 chosen_weight = 0
                 rejected_weight = 0
