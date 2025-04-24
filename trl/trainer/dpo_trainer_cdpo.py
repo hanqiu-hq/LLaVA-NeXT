@@ -1105,9 +1105,12 @@ class DPOTrainer(Trainer):
                     if self.noise_loss_type.startswith("reform_weight_clip"):
                         import re
                         match = re.search(r'_(\d+)_(\d+)$', self.noise_loss_type)
-                        min_weight, max_weight = int(match.group(1)) / 10, int(match.group(2)) / 10
-                        chosen_weight = chosen_weight.clamp(min=min_weight, max=max_weight)
-                        rejected_weight = chosen_weight.clamp(min=min_weight, max=max_weight)
+                        if match:
+                            min_weight, max_weight = int(match.group(1)) / 10, int(match.group(2)) / 10
+                        else:
+                            min_weight, max_weight = 0, 1
+                        chosen_weight = chosen_weight.clamp(min=-min_weight, max=max_weight)
+                        rejected_weight = chosen_weight.clamp(min=-min_weight, max=max_weight)
             else:
                 chosen_weight = 0
                 rejected_weight = 0
