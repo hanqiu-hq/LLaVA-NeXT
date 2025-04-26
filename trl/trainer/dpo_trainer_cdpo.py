@@ -782,8 +782,8 @@ class DPOTrainer(Trainer):
         """
         policy_chosen_logps = policy_chosen_logps_per_token.sum(-1)
         policy_rejected_logps = policy_rejected_logps_per_token.sum(-1)
-        policy_chosen_loss_term = (policy_chosen_logps_per_token * (1 + chosen_weight)).sum(-1)
-        policy_rejected_loss_term = (policy_rejected_logps_per_token * (1 - rejected_weight)).sum(-1)
+        policy_chosen_loss_term = (policy_chosen_logps_per_token * chosen_weight).sum(-1)
+        policy_rejected_loss_term = (policy_rejected_logps_per_token * rejected_weight).sum(-1)
 
         pi_logratios = policy_chosen_logps - policy_rejected_logps
         ref_logratios = reference_chosen_logps - reference_rejected_logps
@@ -1108,6 +1108,20 @@ class DPOTrainer(Trainer):
                         min_weight, max_weight = int(match.group(1)) / 10, int(match.group(2)) / 10
                         chosen_weight = chosen_weight.clamp(min=-min_weight, max=max_weight)
                         rejected_weight = chosen_weight.clamp(min=-min_weight, max=max_weight)
+
+                    if self.noise_loss_type.startswith("reform_weight_mean"):
+                        chosen_diff = chosen_weight.sum(-1) / (~policy_chosen_logps_per_token.eq(0)).sum(-1)
+                        rejected_diff = rejected_weight.sum(-1) / (~policy_rejected_logps_per_token.eq(0)).sum(-1)
+                        chosen_weight = 1 + chosen_diff
+                        rejected_weight = 1 - rejected_diff
+                    if self.noise_loss_type.startswith("reform_weight_both"):
+                        chosen_diff = chosen_weight.sum(-1) / (~policy_chosen_logps_per_token.eq(0)).sum(-1)
+                        rejected_diff = rejected_weight.sum(-1) / (~policy_rejected_logps_per_token.eq(0)).sum(-1)
+                        chosen_weight = 1 + chosen_diff - rejected_diff
+                        rejected_weight = chosen_weight
+                    else:
+                        chosen_weight = 1 + chosen_weight
+                        rejected_weight = 1 - rejected_weight
             else:
                 chosen_weight = 0
                 rejected_weight = 0
