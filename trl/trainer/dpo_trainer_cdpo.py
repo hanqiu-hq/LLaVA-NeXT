@@ -810,7 +810,7 @@ class DPOTrainer(Trainer):
             weight = weight / self.beta
             losses = weight * (policy_chosen_loss_term / chosen_length - policy_rejected_loss_term / rejected_length)
         elif self.average_mode == "mean_both":
-            weight = weight / self.beta
+            weight = weight * 8 / self.beta
             losses = weight * (policy_chosen_loss_term - policy_rejected_loss_term) / ((chosen_length + rejected_length) / 2)
         else:
             losses = weight * (policy_chosen_loss_term - policy_rejected_loss_term)
