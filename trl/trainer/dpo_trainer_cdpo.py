@@ -1123,8 +1123,8 @@ class DPOTrainer(Trainer):
                         chosen_weight = 1 + chosen_weight
                         rejected_weight = 1 - rejected_weight
             else:
-                chosen_weight = 0
-                rejected_weight = 0
+                chosen_weight = 1
+                rejected_weight = 1
 
             chosen_length = (chosen_labels[:, 1:] != self.label_pad_token_id).sum(-1)
             rejected_length = (rejected_labels[:, 1:] != self.label_pad_token_id).sum(-1)
