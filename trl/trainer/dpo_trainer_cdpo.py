@@ -1174,8 +1174,13 @@ class DPOTrainer(Trainer):
                     self.noise_beta * (chosen_logps - chosen_logps_noise)).mean()
             elif self.noise_loss_type == 'pos_dpo':
                 with torch.no_grad():
-                    reference_chosen_logps_noise = self.batch_forward(
-                        self.ref_model, batch, noise_images, average_log_prob=False)
+                    if self.ref_model is None:
+                        with self.null_ref_context():
+                            reference_chosen_logps_noise = self.batch_forward(
+                                self.model, batch, noise_images, average_log_prob=False)
+                    else:
+                        reference_chosen_logps_noise = self.batch_forward(
+                            self.ref_model, batch, noise_images, average_log_prob=False)
                 unscaled_noise_loss = self.dpo_loss(
                     policy_chosen_logps,
                     chosen_logps_noise,
