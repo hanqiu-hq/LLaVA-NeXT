@@ -1107,18 +1107,18 @@ class DPOTrainer(Trainer):
                         match = re.search(r'_(\d+)_(\d+)$', self.noise_loss_type)
                         min_weight, max_weight = int(match.group(1)) / 10, int(match.group(2)) / 10
                         chosen_weight = chosen_weight.clamp(min=-min_weight, max=max_weight)
-                        rejected_weight = chosen_weight.clamp(min=-min_weight, max=max_weight)
+                        rejected_weight = rejected_weight.clamp(min=-min_weight, max=max_weight)
 
                     if self.noise_loss_type.startswith("reform_weight_mean"):
                         chosen_diff = chosen_weight.sum(-1) / (~policy_chosen_logps_per_token.eq(0)).sum(-1)
                         rejected_diff = rejected_weight.sum(-1) / (~policy_rejected_logps_per_token.eq(0)).sum(-1)
                         chosen_weight = 1 + chosen_diff
                         rejected_weight = 1 - rejected_diff
-                    if self.noise_loss_type.startswith("reform_weight_both"):
+                    elif self.noise_loss_type.startswith("reform_weight_both"):
                         chosen_diff = chosen_weight.sum(-1) / (~policy_chosen_logps_per_token.eq(0)).sum(-1)
                         rejected_diff = rejected_weight.sum(-1) / (~policy_rejected_logps_per_token.eq(0)).sum(-1)
                         chosen_weight = 1 + chosen_diff - rejected_diff
-                        rejected_weight = chosen_weight
+                        rejected_weight = 1
                     else:
                         chosen_weight = 1 + chosen_weight
                         rejected_weight = 1 - rejected_weight
