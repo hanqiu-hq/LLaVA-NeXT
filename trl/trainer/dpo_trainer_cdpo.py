@@ -1102,22 +1102,25 @@ class DPOTrainer(Trainer):
                     chosen_logps_noise_per_token, rejected_logps_noise_per_token = self.concatenated_forward(model, batch, noise_images=noise_images)[2:]
                     chosen_weight = (policy_chosen_logps_per_token.exp() - chosen_logps_noise_per_token.exp()) * self.noise_beta
                     rejected_weight = (policy_rejected_logps_per_token.exp() - rejected_logps_noise_per_token.exp()) * self.noise_beta
-                    if self.noise_loss_type.startswith("reform_weight_clip"):
+                    if "clip" in self.noise_loss_type:
                         import re
-                        match = re.search(r'_(\d+)_(\d+)$', self.noise_loss_type)
+                        match = re.search(r'clip_(\d+)_(\d+)$', self.noise_loss_type)
                         min_weight, max_weight = int(match.group(1)) / 10, int(match.group(2)) / 10
                         chosen_weight = chosen_weight.clamp(min=-min_weight, max=max_weight)
                         rejected_weight = rejected_weight.clamp(min=-min_weight, max=max_weight)
 
-                    if self.noise_loss_type.startswith("reform_weight_mean"):
+                    if "mean" in self.noise_loss_type:
                         chosen_diff = chosen_weight.sum(-1) / (~policy_chosen_logps_per_token.eq(0)).sum(-1)
                         rejected_diff = rejected_weight.sum(-1) / (~policy_rejected_logps_per_token.eq(0)).sum(-1)
                         chosen_weight = 1 + chosen_diff
                         rejected_weight = 1 - rejected_diff
-                    elif self.noise_loss_type.startswith("reform_weight_both"):
+                    elif "diff_pos" in self.noise_loss_type:
                         chosen_diff = chosen_weight.sum(-1) / (~policy_chosen_logps_per_token.eq(0)).sum(-1)
                         rejected_diff = rejected_weight.sum(-1) / (~policy_rejected_logps_per_token.eq(0)).sum(-1)
                         chosen_weight = 1 + chosen_diff - rejected_diff
+                        rejected_weight = 1
+                    elif "pos" in self.noise_loss_type:
+                        chosen_weight = 1 + chosen_weight
                         rejected_weight = 1
                     else:
                         chosen_weight = 1 + chosen_weight
