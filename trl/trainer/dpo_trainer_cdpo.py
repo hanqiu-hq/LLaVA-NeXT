@@ -1104,7 +1104,7 @@ class DPOTrainer(Trainer):
                     rejected_weight = (policy_rejected_logps_per_token.exp() - rejected_logps_noise_per_token.exp()) * self.noise_beta
                     if "clip" in self.noise_loss_type:
                         import re
-                        match = re.search(r'clip_(\d+)_(\d+)$', self.noise_loss_type)
+                        match = re.search(r'clip_(\d+)_(\d+)', self.noise_loss_type)
                         min_weight, max_weight = int(match.group(1)) / 10, int(match.group(2)) / 10
                         chosen_weight = chosen_weight.clamp(min=-min_weight, max=max_weight)
                         rejected_weight = rejected_weight.clamp(min=-min_weight, max=max_weight)
