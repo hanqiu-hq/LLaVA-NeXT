@@ -19,6 +19,12 @@ NUM_GPUS=$1
 DATA_PATH=$2
 OUTPUT_DIR=$3
 LEARNING_RATE=$4
+# default batch size 2
+ACC_BATCH_SIZE=$(echo "scale=0; 2 / $NUM_GPUS" | bc)
+if [ "$ACC_BATCH_SIZE" -lt 1 ]; then
+  ACC_BATCH_SIZE=1
+fi
+
 
 MASTER_PORT=$((RANDOM % 101 + 20001))
 
@@ -49,7 +55,7 @@ torchrun --nproc_per_node=$NUM_GPUS --master_port=$MASTER_PORT \
     --num_train_epochs $EPOCH \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 1 \
-    --gradient_accumulation_steps 2 \
+    --gradient_accumulation_steps $ACC_BATCH_SIZE \
     --evaluation_strategy "no" \
     --save_strategy "no" \
     --save_total_limit 1 \
